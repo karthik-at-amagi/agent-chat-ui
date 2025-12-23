@@ -8,6 +8,7 @@ import { useState } from "react";
 
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
+import { cn } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -23,6 +24,7 @@ import {
   Pencil,
   Check,
   X,
+  Trash2,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { TooltipIconButton } from "../tooltip-icon-button";
@@ -35,6 +37,7 @@ function ThreadList({
   onHideThread,
   onUnhideThread,
   onRenameThread,
+  onDeleteThread,
 }: {
   threads: Thread[];
   hiddenThreadIds: string[];
@@ -43,6 +46,7 @@ function ThreadList({
   onHideThread?: (threadId: string) => void;
   onUnhideThread?: (threadId: string) => void;
   onRenameThread?: (threadId: string, name: string) => Promise<void>;
+  onDeleteThread?: (threadId: string) => Promise<void>;
 }) {
   const [threadId, setThreadId] = useQueryState("threadId");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -82,7 +86,7 @@ function ThreadList({
         return (
           <div
             key={t.thread_id}
-            className="flex w-full items-center gap-1 px-1"
+            className="group relative flex w-full items-center px-1"
           >
             {isEditing ? (
               <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -112,8 +116,13 @@ function ThreadList({
             ) : (
               <>
                 <Button
-                  variant="ghost"
-                  className="flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-2 overflow-hidden text-left font-normal"
+                  variant={t.thread_id === threadId ? "secondary" : "ghost"}
+                  className={cn(
+                    "flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-2 overflow-hidden text-left font-normal transition-all",
+                    t.thread_id === threadId
+                      ? "bg-secondary pr-20"
+                      : "group-hover:pr-20",
+                  )}
                   onClick={(e) => {
                     e.preventDefault();
                     onThreadClick?.(t.thread_id);
@@ -131,7 +140,13 @@ function ThreadList({
                   )}
                 </Button>
 
-                <div className="flex shrink-0">
+                <div
+                  className={cn(
+                    "absolute right-2 flex shrink-0 transition-opacity",
+                    t.thread_id !== threadId &&
+                      "opacity-0 group-hover:opacity-100",
+                  )}
+                >
                   <TooltipIconButton
                     tooltip="Rename thread"
                     onClick={(e) => {
@@ -160,6 +175,24 @@ function ThreadList({
                     ) : (
                       <EyeOff className="h-4 w-4" />
                     )}
+                  </TooltipIconButton>
+
+                  <TooltipIconButton
+                    tooltip="Delete thread"
+                    className="hover:text-destructive"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (
+                        window.confirm(
+                          "Are you sure you want to delete this thread?",
+                        )
+                      ) {
+                        onDeleteThread?.(t.thread_id);
+                      }
+                    }}
+                  >
+                    <Trash2 className="h-4 w-4" />
                   </TooltipIconButton>
                 </div>
               </>
@@ -202,6 +235,7 @@ export default function ThreadHistory() {
     hideThread,
     unhideThread,
     renameThread,
+    deleteThread,
   } = useThreads();
 
   const displayedThreads = showHiddenThreads
@@ -255,6 +289,7 @@ export default function ThreadHistory() {
             onHideThread={hideThread}
             onUnhideThread={unhideThread}
             onRenameThread={renameThread}
+            onDeleteThread={deleteThread}
           />
         )}
       </div>
@@ -282,6 +317,7 @@ export default function ThreadHistory() {
               onHideThread={hideThread}
               onUnhideThread={unhideThread}
               onRenameThread={renameThread}
+              onDeleteThread={deleteThread}
             />
           </SheetContent>
         </Sheet>

@@ -24,6 +24,7 @@ interface ThreadContextType {
   hideThread: (threadId: string) => void;
   unhideThread: (threadId: string) => void;
   renameThread: (threadId: string, name: string) => Promise<void>;
+  deleteThread: (threadId: string) => Promise<void>;
 }
 
 const ThreadContext = createContext<ThreadContextType | undefined>(undefined);
@@ -130,6 +131,19 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     [apiUrl, threads, setThreads],
   );
 
+  const deleteThread = useCallback(
+    async (targetId: string) => {
+      if (!apiUrl || !targetId) return;
+      const client = createClient(apiUrl, getApiKey() ?? undefined);
+      await client.threads.delete(targetId);
+      setThreads((prev) => prev.filter((t) => t.thread_id !== targetId));
+      if (threadId === targetId) {
+        setThreadId(null);
+      }
+    },
+    [apiUrl, threadId, setThreadId, setThreads],
+  );
+
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!apiUrl || !assistantId) return [];
     const client = createClient(apiUrl, getApiKey() ?? undefined);
@@ -215,6 +229,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     hideThread,
     unhideThread,
     renameThread,
+    deleteThread,
   };
 
   return (

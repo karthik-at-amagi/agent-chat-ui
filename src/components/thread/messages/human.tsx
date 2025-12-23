@@ -38,9 +38,13 @@ function EditableContent({
 export function HumanMessage({
   message,
   isLoading,
+  rawIndex,
+  allMessages,
 }: {
   message: Message;
   isLoading: boolean;
+  rawIndex: number;
+  allMessages: Message[];
 }) {
   const thread = useStreamContext();
   const meta = thread.getMessagesMetadata(message);
@@ -68,6 +72,14 @@ export function HumanMessage({
       ] as Message["content"],
     };
 
+    // Robustly find index in latest history
+    const historyMessages =
+      ((thread.history?.at(-1)?.values as any)?.messages as Message[]) || [];
+    const historyIndex = historyMessages.findIndex((m) => m.id === message.id);
+
+    // Final target index: priority historyIndex > rawIndex
+    const targetIndex = historyIndex !== -1 ? historyIndex : rawIndex;
+
     thread.submit(
       { messages: [newMessage] },
       {
@@ -76,15 +88,25 @@ export function HumanMessage({
         streamSubgraphs: true,
         streamResumable: true,
         optimisticValues: (prev) => {
-          const currentMessages = prev.messages ?? [];
-          const index = currentMessages.findIndex((m) => m.id === message.id);
-          const truncated =
-            index === -1 ? currentMessages : currentMessages.slice(0, index);
+          // Use history messages or allMessages as baseline
+          const base =
+            prev.messages && prev.messages.length > 0
+              ? [...prev.messages]
+              : historyMessages.length > 0
+                ? [...historyMessages]
+                : [...allMessages];
 
-          return {
-            ...prev,
-            messages: [...truncated, newMessage],
-          };
+          const idxInBase = base.findIndex((m) => m.id === message.id);
+          const finalIdx = idxInBase !== -1 ? idxInBase : targetIndex;
+
+          if (finalIdx === -1) {
+            console.error("Optimistic: message not found", message.id);
+            return prev;
+          }
+
+          const updated = [...base];
+          updated.splice(finalIdx, 1, newMessage);
+          return { ...prev, messages: updated };
         },
       },
     );

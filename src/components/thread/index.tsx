@@ -476,24 +476,34 @@ export function Thread() {
               contentClassName="pt-8 pb-16 max-w-3xl mx-auto flex flex-col gap-4 w-full"
               content={
                 <>
-                  {messages
-                    .filter((m) => !m.id?.startsWith(DO_NOT_RENDER_ID_PREFIX))
-                    .map((message, index) =>
-                      message.type === "human" ? (
+                  {(() => {
+                    return messages.map((message, index) => {
+                      if (message.id?.startsWith(DO_NOT_RENDER_ID_PREFIX)) {
+                        return null;
+                      }
+
+                      if (message.type !== "human") {
+                        return (
+                          <AssistantMessage
+                            key={message.id || `${message.type}-${index}`}
+                            message={message}
+                            isLoading={isLoading}
+                            handleRegenerate={handleRegenerate}
+                          />
+                        );
+                      }
+
+                      return (
                         <HumanMessage
                           key={message.id || `${message.type}-${index}`}
                           message={message}
                           isLoading={isLoading}
+                          rawIndex={index}
+                          allMessages={messages}
                         />
-                      ) : (
-                        <AssistantMessage
-                          key={message.id || `${message.type}-${index}`}
-                          message={message}
-                          isLoading={isLoading}
-                          handleRegenerate={handleRegenerate}
-                        />
-                      ),
-                    )}
+                      );
+                    });
+                  })()}
                   {/* Special rendering case where there are no AI/tool messages, but there is an interrupt.
                     We need to render it outside of the messages list, since there are no messages to render */}
                   {hasNoAIOrToolMessages && !!stream.interrupt && (
