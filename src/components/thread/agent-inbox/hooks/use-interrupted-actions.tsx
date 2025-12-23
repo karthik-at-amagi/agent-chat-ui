@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useQueryState } from "nuqs";
 import { Decision, DecisionWithEdits, HITLRequest, SubmitType } from "../types";
 import { buildDecisionFromState, createDefaultHumanResponse } from "../utils";
 
@@ -45,6 +46,7 @@ export default function useInterruptedActions({
   interrupt,
 }: UseInterruptedActionsInput): UseInterruptedActionsValue {
   const thread = useStreamContext();
+  const [threadId] = useQueryState("threadId");
   const [humanResponse, setHumanResponse] = useState<DecisionWithEdits[]>([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
@@ -54,6 +56,33 @@ export default function useInterruptedActions({
   const [hasAddedResponse, setHasAddedResponse] = useState(false);
   const [approveAllowed, setApproveAllowed] = useState(false);
   const initialHumanInterruptEditValue = useRef<Record<string, string>>({});
+  const allowCommandsRef = useRef(true);
+
+  useEffect(() => {
+    allowCommandsRef.current = true;
+    return () => {
+      allowCommandsRef.current = false;
+    };
+  }, [threadId]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      allowCommandsRef.current = document.visibilityState === "visible";
+    };
+    const handlePageHide = () => {
+      allowCommandsRef.current = false;
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", handlePageHide);
+    window.addEventListener("beforeunload", handlePageHide);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", handlePageHide);
+      window.removeEventListener("beforeunload", handlePageHide);
+    };
+  }, []);
 
   useEffect(() => {
     const hitlValue = interrupt.value as HITLRequest | undefined;
@@ -84,7 +113,14 @@ export default function useInterruptedActions({
     }
   }, [interrupt]);
 
+  const canIssueCommand = () => {
+    if (!allowCommandsRef.current) return false;
+    if (typeof document === "undefined") return true;
+    return document.visibilityState === "visible";
+  };
+
   const resumeRun = (decisions: Decision[]): boolean => {
+    if (!canIssueCommand()) return false;
     try {
       thread.submit(
         {},
@@ -184,6 +220,7 @@ export default function useInterruptedActions({
     e: React.MouseEvent<HTMLButtonElement, MouseEvent>,
   ) => {
     e.preventDefault();
+    if (!canIssueCommand()) return;
     setLoading(true);
     initialHumanInterruptEditValue.current = {};
 
