@@ -57,6 +57,19 @@ NEXT_PUBLIC_API_URL=http://localhost:2024
 NEXT_PUBLIC_ASSISTANT_ID=agent
 ```
 
+## Video Rendering in Tool Calls
+
+If a tool call response contains a `video_url` field (e.g., `{"video_url": "/static/video.mp4"}`), the UI will automatically render a video player.
+
+To resolve these video URLs against a backend server, set the `NEXT_PUBLIC_VIDEO_BACKEND_URL` environment variable.
+
+```bash
+NEXT_PUBLIC_VIDEO_BACKEND_URL=http://localhost:8000
+```
+
+> [!TIP]
+> If `NEXT_PUBLIC_VIDEO_BACKEND_URL` is set, the UI will prepend it to the `video_url` (handling slashes automatically). If not set, it will treat `video_url` as relative to the current domain or as an absolute URL if provided as such.
+
 > [!TIP]
 > If you want to connect to a production LangGraph server, read the [Going to Production](#going-to-production) section.
 
