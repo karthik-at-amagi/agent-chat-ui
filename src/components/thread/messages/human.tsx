@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { BranchSwitcher, CommandBar } from "./shared";
 import { MultimodalPreview } from "@/components/thread/MultimodalPreview";
 import { isBase64ContentBlock } from "@/lib/multimodal-utils";
+import { v4 as uuidv4 } from "uuid";
 
 function EditableContent({
   value,
@@ -52,7 +53,21 @@ export function HumanMessage({
   const handleSubmitEdit = () => {
     setIsEditing(false);
 
-    const newMessage: Message = { type: "human", content: value };
+    const nonTextBlocks = Array.isArray(message.content)
+      ? message.content.filter(
+          (c) => c && typeof c === "object" && c.type !== "text",
+        )
+      : [];
+
+    const newMessage: Message = {
+      id: uuidv4(),
+      type: "human",
+      content: [
+        ...(value.trim().length > 0 ? [{ type: "text", text: value }] : []),
+        ...nonTextBlocks,
+      ] as Message["content"],
+    };
+
     thread.submit(
       { messages: [newMessage] },
       {
@@ -61,12 +76,14 @@ export function HumanMessage({
         streamSubgraphs: true,
         streamResumable: true,
         optimisticValues: (prev) => {
-          const values = meta?.firstSeenState?.values;
-          if (!values) return prev;
+          const currentMessages = prev.messages ?? [];
+          const index = currentMessages.findIndex((m) => m.id === message.id);
+          const truncated =
+            index === -1 ? currentMessages : currentMessages.slice(0, index);
 
           return {
-            ...values,
-            messages: [...(values.messages ?? []), newMessage],
+            ...prev,
+            messages: [...truncated, newMessage],
           };
         },
       },
@@ -111,7 +128,7 @@ export function HumanMessage({
             )}
             {/* Render text if present, otherwise fallback to file/image name */}
             {contentString ? (
-              <p className="bg-muted ml-auto w-fit rounded-3xl px-4 py-2 text-right whitespace-pre-wrap">
+              <p className="bg-muted ml-auto w-fit rounded-3xl px-4 py-2 whitespace-pre-wrap">
                 {contentString}
               </p>
             ) : null}

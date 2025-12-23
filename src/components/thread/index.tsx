@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { v4 as uuidv4 } from "uuid";
 import { ReactNode, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
@@ -12,25 +13,28 @@ import {
   DO_NOT_RENDER_ID_PREFIX,
   ensureToolCallsHaveResponses,
 } from "@/lib/ensure-tool-responses";
-import { LangGraphLogoSVG } from "../icons/langgraph";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import {
   ArrowDown,
+  ArrowUp,
   LoaderCircle,
   PanelRightOpen,
   PanelRightClose,
   SquarePen,
   XIcon,
   Plus,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import { useThreads } from "@/providers/Thread";
 import ThreadHistory from "./history";
 import { toast } from "sonner";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
-import { GitHubSVG } from "../icons/github";
+import { useTheme } from "next-themes";
 import {
   Tooltip,
   TooltipContent,
@@ -71,6 +75,36 @@ function StickyToBottomContent(props: {
   );
 }
 
+function ScrollToTop(props: { className?: string }) {
+  const { scrollRef } = useStickToBottomContext();
+
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      setIsVisible(el.scrollTop > 300);
+    };
+    el.addEventListener("scroll", handleScroll);
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [scrollRef]);
+
+  if (!isVisible) return null;
+  return (
+    <Button
+      variant="outline"
+      className={props.className}
+      onClick={() => {
+        scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+      }}
+    >
+      <ArrowUp className="h-4 w-4" />
+      <span>Scroll to top</span>
+    </Button>
+  );
+}
+
 function ScrollToBottom(props: { className?: string }) {
   const { isAtBottom, scrollToBottom } = useStickToBottomContext();
 
@@ -87,24 +121,35 @@ function ScrollToBottom(props: { className?: string }) {
   );
 }
 
-function OpenGitHubRepo() {
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return <div className="size-6" />;
+
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <a
-            href="https://github.com/langchain-ai/agent-chat-ui"
-            target="_blank"
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             className="flex items-center justify-center"
           >
-            <GitHubSVG
-              width="24"
-              height="24"
-            />
-          </a>
+            {theme === "dark" ? (
+              <Sun className="size-5" />
+            ) : (
+              <Moon className="size-5" />
+            )}
+          </Button>
         </TooltipTrigger>
         <TooltipContent side="left">
-          <p>Open GitHub repo</p>
+          <p>Toggle theme</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -139,8 +184,23 @@ export function Thread() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
-  const messages = stream.messages;
+  const { threads } = useThreads();
+  const threadSummary = threads.find((t) => t.thread_id === threadId);
+  const historyMessages =
+    ((stream.history?.at(-1)?.values as any)?.messages as Message[]) ?? [];
+  const summaryMessages =
+    ((threadSummary?.values as any)?.messages as Message[]) ?? [];
+  const messages =
+    stream.messages.length > 0
+      ? stream.messages
+      : historyMessages.length > 0
+        ? historyMessages
+        : summaryMessages;
   const isLoading = stream.isLoading;
+  const isThreadBusy =
+    threadSummary?.status === "busy" ||
+    Boolean(stream.history?.at(-1)?.next?.length) ||
+    stream.isLoading;
 
   const lastError = useRef<string | undefined>(undefined);
 
@@ -196,7 +256,11 @@ export function Thread() {
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if ((input.trim().length === 0 && contentBlocks.length === 0) || isLoading)
+    if (
+      (input.trim().length === 0 && contentBlocks.length === 0) ||
+      isLoading ||
+      isThreadBusy
+    )
       return;
     setFirstTokenReceived(false);
 
@@ -209,7 +273,17 @@ export function Thread() {
       ] as Message["content"],
     };
 
-    const toolMessages = ensureToolCallsHaveResponses(stream.messages);
+    let toolMessages: Message[] = [];
+    try {
+      toolMessages = ensureToolCallsHaveResponses(stream.messages);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Missing tool response for previous tool call.",
+      );
+      return;
+    }
 
     const context =
       Object.keys(artifactContext).length > 0 ? artifactContext : undefined;
@@ -259,7 +333,7 @@ export function Thread() {
     <div className="flex h-screen w-full overflow-hidden">
       <div className="relative hidden lg:flex">
         <motion.div
-          className="absolute z-20 h-full overflow-hidden border-r bg-white"
+          className="bg-background absolute z-20 h-full overflow-hidden border-r"
           style={{ width: 300 }}
           animate={
             isLargeScreen
@@ -313,7 +387,7 @@ export function Thread() {
               <div>
                 {(!chatHistoryOpen || !isLargeScreen) && (
                   <Button
-                    className="hover:bg-gray-100"
+                    className="hover:bg-muted"
                     variant="ghost"
                     onClick={() => setChatHistoryOpen((p) => !p)}
                   >
@@ -326,7 +400,7 @@ export function Thread() {
                 )}
               </div>
               <div className="absolute top-2 right-4 flex items-center">
-                <OpenGitHubRepo />
+                <ThemeToggle />
               </div>
             </div>
           )}
@@ -336,7 +410,7 @@ export function Thread() {
                 <div className="absolute left-0 z-10">
                   {(!chatHistoryOpen || !isLargeScreen) && (
                     <Button
-                      className="hover:bg-gray-100"
+                      className="hover:bg-muted"
                       variant="ghost"
                       onClick={() => setChatHistoryOpen((p) => !p)}
                     >
@@ -360,19 +434,22 @@ export function Thread() {
                     damping: 30,
                   }}
                 >
-                  <LangGraphLogoSVG
+                  <Image
+                    src="/logo.png"
+                    alt="Agentic Search Mascot Picky"
                     width={32}
                     height={32}
+                    className="rounded-lg"
                   />
                   <span className="text-xl font-semibold tracking-tight">
-                    Agent Chat
+                    Agentic Search
                   </span>
                 </motion.button>
               </div>
 
               <div className="flex items-center gap-4">
                 <div className="flex items-center">
-                  <OpenGitHubRepo />
+                  <ThemeToggle />
                 </div>
                 <TooltipIconButton
                   size="lg"
@@ -392,7 +469,7 @@ export function Thread() {
           <StickToBottom className="relative flex-1 overflow-hidden">
             <StickyToBottomContent
               className={cn(
-                "absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent",
+                "[&::-webkit-scrollbar-thumb]:bg-border absolute inset-0 overflow-y-scroll px-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent",
                 !chatStarted && "mt-[25vh] flex flex-col items-stretch",
                 chatStarted && "grid grid-rows-[1fr_auto]",
               )}
@@ -433,17 +510,24 @@ export function Thread() {
                 </>
               }
               footer={
-                <div className="sticky bottom-0 flex flex-col items-center gap-8 bg-white">
+                <div className="bg-background sticky bottom-0 flex flex-col items-center gap-8">
                   {!chatStarted && (
                     <div className="flex items-center gap-3">
-                      <LangGraphLogoSVG className="h-8 flex-shrink-0" />
+                      <Image
+                        src="/logo.png"
+                        alt="Agentic Search Logo"
+                        width={48}
+                        height={48}
+                        className="rounded-xl"
+                      />
                       <h1 className="text-2xl font-semibold tracking-tight">
-                        Agent Chat
+                        Agentic Search
                       </h1>
                     </div>
                   )}
 
                   <ScrollToBottom className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-4 -translate-x-1/2" />
+                  <ScrollToTop className="animate-in fade-in-0 zoom-in-95 absolute bottom-full left-1/2 mb-16 -translate-x-1/2" />
 
                   <div
                     ref={dropRef}
@@ -493,7 +577,7 @@ export function Thread() {
                             />
                             <Label
                               htmlFor="render-tool-calls"
-                              className="text-sm text-gray-600"
+                              className="text-muted-foreground text-sm"
                             >
                               Hide Tool Calls
                             </Label>
@@ -503,8 +587,8 @@ export function Thread() {
                           htmlFor="file-input"
                           className="flex cursor-pointer items-center gap-2"
                         >
-                          <Plus className="size-5 text-gray-600" />
-                          <span className="text-sm text-gray-600">
+                          <Plus className="text-muted-foreground size-5" />
+                          <span className="text-muted-foreground text-sm">
                             Upload PDF or Image
                           </span>
                         </Label>
@@ -531,6 +615,7 @@ export function Thread() {
                             className="ml-auto shadow-md transition-all"
                             disabled={
                               isLoading ||
+                              isThreadBusy ||
                               (!input.trim() && contentBlocks.length === 0)
                             }
                           >

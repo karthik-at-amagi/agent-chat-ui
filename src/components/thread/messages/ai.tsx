@@ -115,13 +115,18 @@ export function AssistantMessage({
   );
 
   const thread = useStreamContext();
+  const messages = thread.messages;
   const isLastMessage =
-    thread.messages[thread.messages.length - 1].id === message?.id;
+    messages.length > 0 && messages[messages.length - 1].id === message?.id;
   const hasNoAIOrToolMessages = !thread.messages.find(
     (m) => m.type === "ai" || m.type === "tool",
   );
   const meta = message ? thread.getMessagesMetadata(message) : undefined;
-  const threadInterrupt = thread.interrupt;
+  const lastState = thread.history?.at(-1);
+  const hasTaskInterrupt = lastState?.tasks?.some(
+    (task) => Array.isArray(task.interrupts) && task.interrupts.length > 0,
+  );
+  const threadInterrupt = hasTaskInterrupt ? thread.interrupt : undefined;
 
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
   const anthropicStreamedToolCalls = Array.isArray(content)
