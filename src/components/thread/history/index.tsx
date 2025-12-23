@@ -1,7 +1,10 @@
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { useThreads } from "@/providers/Thread";
 import { Thread } from "@langchain/langgraph-sdk";
-import { useEffect } from "react";
+import { useState } from "react";
 
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
@@ -12,49 +15,155 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PanelRightOpen, PanelRightClose } from "lucide-react";
+import {
+  PanelRightOpen,
+  PanelRightClose,
+  Eye,
+  EyeOff,
+  Pencil,
+  Check,
+  X,
+} from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { TooltipIconButton } from "../tooltip-icon-button";
 
 function ThreadList({
   threads,
+  hiddenThreadIds,
+  showHiddenThreads,
   onThreadClick,
+  onHideThread,
+  onUnhideThread,
+  onRenameThread,
 }: {
   threads: Thread[];
+  hiddenThreadIds: string[];
+  showHiddenThreads: boolean;
   onThreadClick?: (threadId: string) => void;
+  onHideThread?: (threadId: string) => void;
+  onUnhideThread?: (threadId: string) => void;
+  onRenameThread?: (threadId: string, name: string) => Promise<void>;
 }) {
   const [threadId, setThreadId] = useQueryState("threadId");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  const handleStartEdit = (t: Thread, currentText: string) => {
+    setEditingId(t.thread_id);
+    setEditName(currentText);
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    if (onRenameThread) {
+      await onRenameThread(id, editName);
+    }
+    setEditingId(null);
+  };
 
   return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
+    <div className="[&::-webkit-scrollbar-thumb]:bg-border flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
       {threads.map((t) => {
-        let itemText = t.thread_id;
-        if (
-          typeof t.values === "object" &&
-          t.values &&
-          "messages" in t.values &&
-          Array.isArray(t.values.messages) &&
-          t.values.messages?.length > 0
-        ) {
-          const firstMessage = t.values.messages[0];
-          itemText = getContentString(firstMessage.content);
+        let itemText = (t.metadata?.name as string) || t.thread_id;
+        if (!t.metadata?.name) {
+          if (
+            typeof t.values === "object" &&
+            t.values &&
+            "messages" in t.values &&
+            Array.isArray(t.values.messages) &&
+            t.values.messages?.length > 0
+          ) {
+            const firstMessage = t.values.messages[0];
+            itemText = getContentString(firstMessage.content);
+          }
         }
+        const isHidden = hiddenThreadIds.includes(t.thread_id);
+        const isEditing = editingId === t.thread_id;
+
         return (
           <div
             key={t.thread_id}
-            className="w-full px-1"
+            className="flex w-full items-center gap-1 px-1"
           >
-            <Button
-              variant="ghost"
-              className="w-[280px] items-start justify-start text-left font-normal"
-              onClick={(e) => {
-                e.preventDefault();
-                onThreadClick?.(t.thread_id);
-                if (t.thread_id === threadId) return;
-                setThreadId(t.thread_id);
-              }}
-            >
-              <p className="truncate text-ellipsis">{itemText}</p>
-            </Button>
+            {isEditing ? (
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <Input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="h-8 flex-1"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveEdit(t.thread_id);
+                    if (e.key === "Escape") setEditingId(null);
+                  }}
+                />
+                <TooltipIconButton
+                  tooltip="Save"
+                  onClick={() => handleSaveEdit(t.thread_id)}
+                >
+                  <Check className="h-4 w-4" />
+                </TooltipIconButton>
+                <TooltipIconButton
+                  tooltip="Cancel"
+                  onClick={() => setEditingId(null)}
+                >
+                  <X className="h-4 w-4" />
+                </TooltipIconButton>
+              </div>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  className="flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-2 overflow-hidden text-left font-normal"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onThreadClick?.(t.thread_id);
+                    if (t.thread_id === threadId) return;
+                    setThreadId(t.thread_id);
+                  }}
+                >
+                  <span className="min-w-0 flex-1 truncate text-ellipsis">
+                    {itemText}
+                  </span>
+                  {showHiddenThreads && isHidden && (
+                    <span className="text-muted-foreground shrink-0 text-xs">
+                      Hidden
+                    </span>
+                  )}
+                </Button>
+
+                <div className="flex shrink-0">
+                  <TooltipIconButton
+                    tooltip="Rename thread"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleStartEdit(t, itemText);
+                    }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </TooltipIconButton>
+
+                  <TooltipIconButton
+                    tooltip={isHidden ? "Unhide thread" : "Hide thread"}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (isHidden) {
+                        onUnhideThread?.(t.thread_id);
+                      } else {
+                        onHideThread?.(t.thread_id);
+                      }
+                    }}
+                  >
+                    {isHidden ? (
+                      <Eye className="h-4 w-4" />
+                    ) : (
+                      <EyeOff className="h-4 w-4" />
+                    )}
+                  </TooltipIconButton>
+                </div>
+              </>
+            )}
           </div>
         );
       })}
@@ -64,7 +173,7 @@ function ThreadList({
 
 function ThreadHistoryLoading() {
   return (
-    <div className="flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-track]:bg-transparent">
+    <div className="[&::-webkit-scrollbar-thumb]:bg-border flex h-full w-full flex-col items-start justify-start gap-2 overflow-y-scroll [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent">
       {Array.from({ length: 30 }).map((_, i) => (
         <Skeleton
           key={`skeleton-${i}`}
@@ -81,25 +190,47 @@ export default function ThreadHistory() {
     "chatHistoryOpen",
     parseAsBoolean.withDefault(false),
   );
+  const [showHiddenThreads, setShowHiddenThreads] = useQueryState(
+    "showHiddenThreads",
+    parseAsBoolean.withDefault(false),
+  );
 
-  const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
-    useThreads();
+  const {
+    threads,
+    threadsLoading,
+    hiddenThreadIds,
+    hideThread,
+    unhideThread,
+    renameThread,
+  } = useThreads();
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    setThreadsLoading(true);
-    getThreads()
-      .then(setThreads)
-      .catch(console.error)
-      .finally(() => setThreadsLoading(false));
-  }, []);
+  const displayedThreads = showHiddenThreads
+    ? threads
+    : threads.filter((thread) => !hiddenThreadIds.includes(thread.thread_id));
+
+  const hiddenToggleId = "show-hidden-threads-toggle";
+  const hiddenToggleControl = (
+    <div className="flex w-full items-center justify-between px-4 text-sm">
+      <Label
+        htmlFor={hiddenToggleId}
+        className="text-muted-foreground text-sm font-medium"
+      >
+        Show hidden threads
+      </Label>
+      <Switch
+        id={hiddenToggleId}
+        checked={showHiddenThreads}
+        onCheckedChange={(checked) => setShowHiddenThreads(checked)}
+      />
+    </div>
+  );
 
   return (
     <>
-      <div className="shadow-inner-right hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] border-slate-300 lg:flex">
+      <div className="shadow-inner-right bg-background border-border hidden h-screen w-[300px] shrink-0 flex-col items-start justify-start gap-6 border-r-[1px] lg:flex">
         <div className="flex w-full items-center justify-between px-4 pt-1.5">
           <Button
-            className="hover:bg-gray-100"
+            className="hover:bg-muted"
             variant="ghost"
             onClick={() => setChatHistoryOpen((p) => !p)}
           >
@@ -113,10 +244,18 @@ export default function ThreadHistory() {
             Thread History
           </h1>
         </div>
+        {hiddenToggleControl}
         {threadsLoading ? (
           <ThreadHistoryLoading />
         ) : (
-          <ThreadList threads={threads} />
+          <ThreadList
+            threads={displayedThreads}
+            hiddenThreadIds={hiddenThreadIds}
+            showHiddenThreads={showHiddenThreads}
+            onHideThread={hideThread}
+            onUnhideThread={unhideThread}
+            onRenameThread={renameThread}
+          />
         )}
       </div>
       <div className="lg:hidden">
@@ -129,14 +268,20 @@ export default function ThreadHistory() {
         >
           <SheetContent
             side="left"
-            className="flex lg:hidden"
+            className="flex flex-col gap-4 lg:hidden"
           >
             <SheetHeader>
               <SheetTitle>Thread History</SheetTitle>
             </SheetHeader>
+            {hiddenToggleControl}
             <ThreadList
-              threads={threads}
+              threads={displayedThreads}
+              hiddenThreadIds={hiddenThreadIds}
+              showHiddenThreads={showHiddenThreads}
               onThreadClick={() => setChatHistoryOpen((o) => !o)}
+              onHideThread={hideThread}
+              onUnhideThread={unhideThread}
+              onRenameThread={renameThread}
             />
           </SheetContent>
         </Sheet>
