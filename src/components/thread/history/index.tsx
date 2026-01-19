@@ -177,7 +177,7 @@ function ThreadList({
                     )}
                   </TooltipIconButton>
 
-                  <TooltipIconButton
+                  {/* <TooltipIconButton
                     tooltip="Delete thread"
                     className="hover:text-destructive"
                     onClick={(e) => {
@@ -193,7 +193,7 @@ function ThreadList({
                     }}
                   >
                     <Trash2 className="h-4 w-4" />
-                  </TooltipIconButton>
+                  </TooltipIconButton> */}
                 </div>
               </>
             )}

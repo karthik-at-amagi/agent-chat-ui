@@ -157,13 +157,7 @@ export function HumanMessage({
           </div>
         )}
 
-        <div
-          className={cn(
-            "ml-auto flex items-center gap-2 transition-opacity",
-            "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
-            isEditing && "opacity-100",
-          )}
-        >
+        <div className="ml-auto flex items-center gap-2">
           <BranchSwitcher
             branch={meta?.branch}
             branchOptions={meta?.branchOptions}
