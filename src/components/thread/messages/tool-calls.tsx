@@ -1,10 +1,14 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronUp, PlusCircle, Download } from "lucide-react";
+import { getRuntimeEnv } from "@/lib/utils";
 import { useVideoEditor } from "@/providers/VideoEditor";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useQueryState } from "nuqs";
+import { FeedbackPopover } from "./feedback";
+import { useAuth } from "@/providers/Auth";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
@@ -125,6 +129,7 @@ function findAllVideoUrls(data: any): string[] {
 const MAX_CHAR_LENGTH = 50;
 const MAX_LINES = 2;
 const MAX_JSON_ITEMS = 0;
+const CLIP_FEEDBACK_WHITELISTED_TOOLS = ["show_clips"];
 
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -136,8 +141,17 @@ function formatTime(seconds: number): string {
 }
 
 export function ToolResult({ message }: { message: ToolMessage }) {
+  const { apiId } = useAuth();
   const [isExpanded, setIsExpanded] = useState(false);
   const { addToMediaPool, assets } = useVideoEditor();
+  const [threadId] = useQueryState("threadId");
+  const [clipFeedback, setClipFeedback] = useState<
+    Record<string, { vote: 1 | -1 | null; text: string }>
+  >({});
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [activeFeedbackClipId, setActiveFeedbackClipId] = useState<
+    string | null
+  >(null);
 
   let parsedContent: any;
   let isJsonContent = false;
@@ -170,7 +184,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     ? findAllVideoUrls(parsedContent)
     : [];
 
-  const backendUrl = process.env.NEXT_PUBLIC_VIDEO_BACKEND_URL;
+  const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
   const cleanBackendUrl = backendUrl?.endsWith("/")
     ? backendUrl.slice(0, -1)
     : backendUrl;
@@ -196,6 +210,17 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     };
   });
 
+  const canShowClipFeedback = CLIP_FEEDBACK_WHITELISTED_TOOLS.includes(
+    message.name || "",
+  );
+
+  const feedbackClipKeys = useMemo(() => {
+    if (!canShowClipFeedback) return [];
+    return videoClips
+      .filter((clip) => clip.asset_id && clip.clip_id)
+      .map((clip) => `${clip.asset_id}:${clip.clip_id}`);
+  }, [canShowClipFeedback, videoClips]);
+
   // Also handle cases where we just have URLs but no clip metadata
   const videoUrls = Array.from(new Set(findAllVideoUrls(message.artifact)));
   const knownUrls = new Set(videoClips.map((c) => c.video_url).filter(Boolean));
@@ -214,6 +239,150 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       ? parsedContent
       : Object.entries(parsedContent)
     : [];
+
+  const getClipKey = (clip: any) => `${clip.asset_id}:${clip.clip_id}`;
+  const getClipFeedback = (clip: any) =>
+    clipFeedback[getClipKey(clip)] || { vote: null, text: "" };
+
+  useEffect(() => {
+    const fetchClipFeedback = async () => {
+      if (!threadId || !cleanBackendUrl || feedbackClipKeys.length === 0)
+        return;
+
+      try {
+        const results = await Promise.all(
+          feedbackClipKeys.map(async (key) => {
+            const [assetId, clipId] = key.split(":");
+            const url = new URL(`${cleanBackendUrl}/feedback/clip`);
+            url.searchParams.set("thread_id", threadId);
+            url.searchParams.set("message_id", message.id || "");
+            url.searchParams.set("asset_id", assetId);
+            url.searchParams.set("clip_id", clipId);
+            url.searchParams.set("actor_type", "user");
+            url.searchParams.set("actor_id", "1");
+
+            const res = await fetch(url.toString(), {
+              headers: {
+                ...(apiId && { "x-login-id": apiId }),
+              },
+            });
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (data && typeof data.vote === "number") {
+              return {
+                key,
+                vote: data.vote as 1 | -1,
+                text: data.feedback_text ?? "",
+              };
+            }
+            return null;
+          }),
+        );
+
+        const nextFeedback: Record<
+          string,
+          { vote: 1 | -1 | null; text: string }
+        > = {};
+        results.forEach((item) => {
+          if (item) {
+            nextFeedback[item.key] = {
+              vote: item.vote,
+              text: item.text,
+            };
+          }
+        });
+
+        if (Object.keys(nextFeedback).length > 0) {
+          setClipFeedback((prev) => ({
+            ...prev,
+            ...nextFeedback,
+          }));
+        }
+      } catch (e) {
+        console.error("Failed to fetch clip feedback", e);
+      }
+    };
+
+    fetchClipFeedback();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, cleanBackendUrl, message.id, apiId]);
+
+  const submitClipFeedback = async (
+    clip: any,
+    newVote: 1 | -1 | 0,
+    feedbackText: string | null,
+  ) => {
+    if (!threadId || !cleanBackendUrl) return;
+
+    const clipId = getClipKey(clip);
+    setIsSubmittingFeedback(true);
+    setActiveFeedbackClipId(clipId);
+
+    try {
+      const payload = {
+        thread_id: threadId,
+        message_id: message.id,
+        asset_id: clip.asset_id,
+        clip_id: clip.clip_id,
+        actor_type: "user",
+        actor_id: "1",
+        vote: newVote,
+        feedback_text: feedbackText,
+      };
+
+      const res = await fetch(`${cleanBackendUrl}/feedback/clip`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiId && { "x-login-id": apiId }),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to submit feedback");
+      }
+
+      setClipFeedback((prev) => ({
+        ...prev,
+        [clipId]: {
+          vote: newVote === 0 ? null : (newVote as 1 | -1),
+          text: feedbackText || "",
+        },
+      }));
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to submit clip feedback");
+    } finally {
+      setIsSubmittingFeedback(false);
+      setActiveFeedbackClipId(null);
+    }
+  };
+
+  const handleClipFeedbackText = (clip: any, value: string) => {
+    const clipId = getClipKey(clip);
+    setClipFeedback((prev) => ({
+      ...prev,
+      [clipId]: {
+        vote: prev[clipId]?.vote ?? null,
+        text: value,
+      },
+    }));
+  };
+
+  const handleClipVote = (clip: any, newVote: 1 | -1) => {
+    const feedback = getClipFeedback(clip);
+    const nextVote = feedback.vote === newVote ? 0 : newVote;
+    submitClipFeedback(clip, nextVote, feedback.text || null);
+    return nextVote !== 0;
+  };
+
+  const handleClipFeedbackSubmit = async (clip: any) => {
+    const feedback = getClipFeedback(clip);
+    if (!feedback.vote) return;
+    await submitClipFeedback(clip, feedback.vote, feedback.text || null);
+    toast.success("Feedback submitted");
+  };
 
   return (
     <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
@@ -286,7 +455,11 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                         className="flex-1 items-center gap-2 text-xs"
                         onClick={async () => {
                           try {
-                            const response = await fetch(clip.displayUrl);
+                            const response = await fetch(clip.displayUrl, {
+                              headers: {
+                                ...(apiId && { "x-login-id": apiId }),
+                              },
+                            });
                             if (!response.ok)
                               throw new Error("Failed to download video");
                             const blob = await response.blob();
@@ -319,9 +492,27 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                           {assets.find((a) => a.id === clip.asset_id)?.title}
                         </div>
                       )}
-                      <div className="text-muted-foreground">
-                        {formatTime(clip.clip_start)} -{" "}
-                        {formatTime(clip.clip_end)}
+                      <div className="text-muted-foreground flex items-center justify-between gap-2">
+                        <span>
+                          {formatTime(clip.clip_start)} -{" "}
+                          {formatTime(clip.clip_end)}
+                        </span>
+                        {canShowClipFeedback && (
+                          <FeedbackPopover
+                            className="font-sans"
+                            vote={getClipFeedback(clip).vote}
+                            text={getClipFeedback(clip).text}
+                            onVote={(newVote) => handleClipVote(clip, newVote)}
+                            onTextChange={(value) =>
+                              handleClipFeedbackText(clip, value)
+                            }
+                            onSubmit={() => handleClipFeedbackSubmit(clip)}
+                            isSubmitting={
+                              isSubmittingFeedback &&
+                              activeFeedbackClipId === getClipKey(clip)
+                            }
+                          />
+                        )}
                       </div>
                     </div>
                   </div>

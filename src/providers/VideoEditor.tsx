@@ -9,6 +9,8 @@ import React, {
   useEffect,
 } from "react";
 import { v4 as uuidv4 } from "uuid";
+import { getRuntimeEnv } from "@/lib/utils";
+import { useAuth } from "./Auth";
 
 export interface AssetInfo {
   id: string;
@@ -60,6 +62,7 @@ const VideoEditorContext = createContext<VideoEditorContextType | undefined>(
 );
 
 export function VideoEditorProvider({ children }: { children: ReactNode }) {
+  const { apiId } = useAuth();
   const [mediaPool, setMediaPool] = useState<MediaPoolItem[]>([]);
   const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [selectedMediaItemId, setSelectedMediaItemId] = useState<string | null>(
@@ -70,7 +73,7 @@ export function VideoEditorProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const fetchAssets = async () => {
-      const backendUrl = process.env.NEXT_PUBLIC_VIDEO_BACKEND_URL;
+      const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
       if (!backendUrl) return;
 
       const cleanBackendUrl = backendUrl.endsWith("/")
@@ -78,7 +81,11 @@ export function VideoEditorProvider({ children }: { children: ReactNode }) {
         : backendUrl;
 
       try {
-        const res = await fetch(`${cleanBackendUrl}/assets`);
+        const res = await fetch(`${cleanBackendUrl}/assets`, {
+          headers: {
+            ...(apiId && { "x-login-id": apiId }),
+          },
+        });
         if (res.ok) {
           const data = await res.json();
           setAssets(data);
@@ -89,7 +96,7 @@ export function VideoEditorProvider({ children }: { children: ReactNode }) {
     };
 
     fetchAssets();
-  }, []);
+  }, [apiId]);
 
   const addToMediaPool = useCallback((item: Omit<MediaPoolItem, "id">) => {
     const newItem = { ...item, id: uuidv4() };

@@ -15,6 +15,7 @@ import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
 import { Feedback } from "./feedback";
+import { useAuth } from "@/providers/Auth";
 
 function CustomComponent({
   message,
@@ -115,6 +116,10 @@ export function AssistantMessage({
     parseAsBoolean.withDefault(true),
   );
 
+  const { permissions } = useAuth();
+  const hasToolView = permissions.includes("tool_view");
+  const effectiveHideToolCalls = hasToolView ? hideToolCalls : true;
+
   const thread = useStreamContext();
   const messages = thread.messages;
   const isLastMessage =
@@ -159,13 +164,13 @@ export function AssistantMessage({
   const isWhitelistedToolResult =
     message?.type === "tool" && WHITELISTED_TOOLS.includes(message.name || "");
 
-  if (isToolResult && hideToolCalls && !isWhitelistedToolResult) {
+  if (isToolResult && effectiveHideToolCalls && !isWhitelistedToolResult) {
     return null;
   }
 
   if (
     !isToolResult &&
-    hideToolCalls &&
+    effectiveHideToolCalls &&
     contentString.length === 0 &&
     !hasCustomComponents &&
     !hasVisibleInterrupt
@@ -193,7 +198,7 @@ export function AssistantMessage({
               </div>
             )}
 
-            {!hideToolCalls && (
+            {!effectiveHideToolCalls && (
               <>
                 {(hasToolCalls && toolCallsHaveContents && (
                   <ToolCalls toolCalls={message.tool_calls} />

@@ -5,7 +5,12 @@ import React, {
   useState,
   useEffect,
 } from "react";
-import { useStream } from "@langchain/langgraph-sdk/react";
+import { getRuntimeEnv } from "@/lib/utils";
+import {
+  useStream,
+  type UseStream,
+  type UseStreamOptions,
+} from "@langchain/langgraph-sdk/react";
 import { type Message } from "@langchain/langgraph-sdk";
 import {
   uiMessageReducer,
@@ -24,20 +29,22 @@ import { PasswordInput } from "@/components/ui/password-input";
 import { getApiKey } from "@/lib/api-key";
 import { useThreads } from "./Thread";
 import { toast } from "sonner";
+import { useAuth } from "./Auth";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
 
-const useTypedStream = useStream<
-  StateType,
-  {
-    UpdateType: {
-      messages?: Message[] | Message | string;
-      ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
-      context?: Record<string, unknown>;
-    };
-    CustomEventType: UIMessage | RemoveUIMessage;
-  }
->;
+type StreamBag = {
+  UpdateType: {
+    messages?: Message[] | Message | string;
+    ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
+    context?: Record<string, unknown>;
+  };
+  CustomEventType: UIMessage | RemoveUIMessage;
+};
+
+const useTypedStream: (
+  options: UseStreamOptions<StateType, StreamBag>,
+) => UseStream<StateType, StreamBag> = useStream;
 
 type StreamContextType = ReturnType<typeof useTypedStream>;
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
@@ -45,14 +52,19 @@ const StreamContext = createContext<StreamContextType | undefined>(undefined);
 async function checkGraphStatus(
   apiUrl: string,
   apiKey: string | null,
+  apiId?: string | null,
 ): Promise<boolean> {
   try {
+    const headers: Record<string, string> = {};
+    if (apiKey) {
+      headers["X-Api-Key"] = apiKey;
+    }
+    if (apiId) {
+      headers["x-login-id"] = apiId;
+    }
+
     const res = await fetch(`${apiUrl}/info`, {
-      ...(apiKey && {
-        headers: {
-          "X-Api-Key": apiKey,
-        },
-      }),
+      headers: Object.keys(headers).length > 0 ? headers : undefined,
     });
 
     return res.ok;
@@ -67,11 +79,13 @@ const StreamSession = ({
   apiKey,
   apiUrl,
   assistantId,
+  apiId,
 }: {
   children: ReactNode;
   apiKey: string | null;
   apiUrl: string;
   assistantId: string;
+  apiId: string | null;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
@@ -82,15 +96,16 @@ const StreamSession = ({
     threadId: threadId ?? null,
     fetchStateHistory: true,
     reconnectOnMount: true,
+    defaultHeaders: apiId ? { "x-login-id": apiId } : undefined,
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
-        options.mutate((prev) => {
+        options.mutate((prev: StateType) => {
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
       }
     },
-    onThreadId: (id) => {
+    onThreadId: (id: string) => {
       setThreadId(id);
       // Refetch threads list when thread ID changes.
       getThreads().then(setThreads).catch(console.error);
@@ -98,7 +113,7 @@ const StreamSession = ({
   });
 
   useEffect(() => {
-    checkGraphStatus(apiUrl, apiKey).then((ok) => {
+    checkGraphStatus(apiUrl, apiKey, apiId).then((ok) => {
       if (!ok) {
         toast.error("Failed to connect to LangGraph server", {
           description: () => (
@@ -113,7 +128,7 @@ const StreamSession = ({
         });
       }
     });
-  }, [apiKey, apiUrl]);
+  }, [apiKey, apiUrl, apiId]);
 
   return (
     <StreamContext.Provider value={streamValue}>
@@ -130,9 +145,12 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   // Get environment variables
-  const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
-  const envAssistantId: string | undefined =
-    process.env.NEXT_PUBLIC_ASSISTANT_ID;
+  const envApiUrl: string | undefined = getRuntimeEnv("NEXT_PUBLIC_API_URL");
+  const envAssistantId: string | undefined = getRuntimeEnv(
+    "NEXT_PUBLIC_ASSISTANT_ID",
+  );
+
+  const { apiId } = useAuth();
 
   // Use URL params with env var fallbacks
   const [apiUrl, setApiUrl] = useQueryState("apiUrl", {
@@ -262,8 +280,9 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   return (
     <StreamSession
       apiKey={apiKey}
-      apiUrl={apiUrl}
-      assistantId={assistantId}
+      apiUrl={finalApiUrl}
+      assistantId={finalAssistantId}
+      apiId={apiId}
     >
       {children}
     </StreamSession>

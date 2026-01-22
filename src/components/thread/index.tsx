@@ -57,6 +57,7 @@ import {
   ArtifactTitle,
   useArtifactContext,
 } from "./artifact";
+import { useAuth } from "@/providers/Auth";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -226,6 +227,9 @@ export function Thread() {
 
   const stream = useStreamContext();
   const { threads } = useThreads();
+  const { permissions } = useAuth();
+  const hasToolView = permissions.includes("tool_view");
+
   const threadSummary = threads.find((t) => t.thread_id === threadId);
   const historyMessages =
     ((stream.history?.at(-1)?.values as any)?.messages as Message[]) ?? [];
@@ -627,38 +631,45 @@ export function Thread() {
                         />
 
                         <div className="flex items-center gap-6 p-2 pt-4">
-                          <div>
-                            <div className="flex items-center space-x-2">
-                              <Switch
-                                id="render-tool-calls"
-                                checked={hideToolCalls ?? false}
-                                onCheckedChange={setHideToolCalls}
-                              />
-                              <Label
-                                htmlFor="render-tool-calls"
-                                className="text-muted-foreground text-sm"
-                              >
-                                Hide Tool Calls
-                              </Label>
+                          {hasToolView && (
+                            <div>
+                              <div className="flex items-center space-x-2">
+                                <Switch
+                                  id="render-tool-calls"
+                                  checked={hideToolCalls ?? false}
+                                  onCheckedChange={setHideToolCalls}
+                                />
+                                <Label
+                                  htmlFor="render-tool-calls"
+                                  className="text-muted-foreground text-sm"
+                                >
+                                  Hide Tool Calls
+                                </Label>
+                              </div>
                             </div>
-                          </div>
-                          <Label
-                            htmlFor="file-input"
-                            className="flex cursor-pointer items-center gap-2"
-                          >
-                            <Plus className="text-muted-foreground size-5" />
-                            <span className="text-muted-foreground text-sm">
-                              Upload PDF or Image
-                            </span>
-                          </Label>
-                          <input
-                            id="file-input"
-                            type="file"
-                            onChange={handleFileUpload}
-                            multiple
-                            accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
-                            className="hidden"
-                          />
+                          )}
+                          {/* 
+                            <>
+                              <Label
+                                htmlFor="file-input"
+                                className="flex cursor-pointer items-center gap-2"
+                              >
+                                <Plus className="text-muted-foreground size-5" />
+                                <span className="text-muted-foreground text-sm">
+                                  Upload PDF or Image
+                                </span>
+                              </Label>
+                              <input
+                                id="file-input"
+                                type="file"
+                                onChange={handleFileUpload}
+                                multiple
+                                accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                                className="hidden"
+                              />
+                            </>
+                          */}
+
                           {stream.isLoading ? (
                             <Button
                               key="stop"

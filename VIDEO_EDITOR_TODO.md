@@ -10,22 +10,18 @@
 
 - [ ] Create `src/components/thread/video-editor/index.tsx` as the main container.
 - [ ] Modify `src/components/thread/index.tsx` to support switching between Artifact view and Video Editor view in the right pane.
+- [ ] Implement resizable divider between chat and video editor.
 - [ ] Implement basic layout: Top (Asset Editor), Middle (Media Pool), Bottom (Timeline).
-
-## Phase 3: Artifact Integration
-
-- [ ] Update `ToolResult` or create a wrapper component to detect `video_url`.
-- [ ] Add "Send to Pool" button to video previews.
-- [ ] Implement the logic to dispatch the "Add to Pool" action with `asset_id`, `start`, and `end`.
 
 ## Phase 4: Media Pool & Asset Editor
 
-- [ ] Build the `MediaPool` component:
-  - [ ] Display list of clips.
-  - [ ] Selection logic.
+- [x] Build the `MediaPool` component:
+  - [x] Implement row-based list layout.
+  - [x] Selection logic.
 - [ ] Build the `AssetEditor` component:
-  - [ ] Video preview player.
-  - [ ] Trim sliders using `@radix-ui/react-slider`.
+  - [ ] Implement video retrieval from `/asset_files/[asset_id].video_ext`.
+  - [ ] Preview player.
+  - [ ] Enhanced trim sliders with `[start-10, end+10]` window and adjustable markers.
   - [ ] "Overwrite" and "Save as New" buttons.
 
 ## Phase 5: Timeline Implementation

@@ -12,7 +12,9 @@ import {
   Dispatch,
   SetStateAction,
 } from "react";
+import { getRuntimeEnv } from "@/lib/utils";
 import { createClient } from "./client";
+import { useAuth } from "./Auth";
 
 interface ThreadContextType {
   getThreads: () => Promise<Thread[]>;
@@ -64,9 +66,12 @@ function getThreadSearchMetadataFilters(assistantId: string) {
 }
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
-  const envApiUrl: string | undefined = process.env.NEXT_PUBLIC_API_URL;
-  const envAssistantId: string | undefined =
-    process.env.NEXT_PUBLIC_ASSISTANT_ID;
+  const envApiUrl: string | undefined = getRuntimeEnv("NEXT_PUBLIC_API_URL");
+  const envAssistantId: string | undefined = getRuntimeEnv(
+    "NEXT_PUBLIC_ASSISTANT_ID",
+  );
+
+  const { apiId } = useAuth();
 
   const [apiUrl] = useQueryState("apiUrl", {
     defaultValue: envApiUrl || "",
@@ -118,7 +123,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const renameThread = useCallback(
     async (targetId: string, name: string) => {
       if (!apiUrl || !targetId) return;
-      const client = createClient(apiUrl, getApiKey() ?? undefined);
+      const client = createClient(apiUrl, getApiKey() ?? undefined, apiId);
       const thread = threads.find((t) => t.thread_id === targetId);
       const newMetadata = { ...(thread?.metadata || {}), name };
       await client.threads.update(targetId, { metadata: newMetadata });
@@ -128,25 +133,25 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         ),
       );
     },
-    [apiUrl, threads, setThreads],
+    [apiUrl, threads, setThreads, apiId],
   );
 
   const deleteThread = useCallback(
     async (targetId: string) => {
       if (!apiUrl || !targetId) return;
-      const client = createClient(apiUrl, getApiKey() ?? undefined);
+      const client = createClient(apiUrl, getApiKey() ?? undefined, apiId);
       await client.threads.delete(targetId);
       setThreads((prev) => prev.filter((t) => t.thread_id !== targetId));
       if (threadId === targetId) {
         setThreadId(null);
       }
     },
-    [apiUrl, threadId, setThreadId, setThreads],
+    [apiUrl, threadId, setThreadId, setThreads, apiId],
   );
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!apiUrl || !assistantId) return [];
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+    const client = createClient(apiUrl, getApiKey() ?? undefined, apiId);
     const metadataFilters = getThreadSearchMetadataFilters(assistantId);
 
     if (metadataFilters.length === 0) return [];
@@ -172,7 +177,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
     }
 
     return dedupedThreads;
-  }, [apiUrl, assistantId]);
+  }, [apiUrl, assistantId, apiId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

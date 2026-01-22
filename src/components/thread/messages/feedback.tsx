@@ -7,64 +7,40 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { TooltipIconButton } from "../tooltip-icon-button";
-import { cn } from "@/lib/utils";
+import { cn, getRuntimeEnv } from "@/lib/utils";
 import { useQueryState } from "nuqs";
+import { useAuth } from "@/providers/Auth";
 
 interface FeedbackProps {
   messageId: string;
 }
 
-export function Feedback({ messageId }: FeedbackProps) {
-  const [threadId] = useQueryState("threadId");
-  const [vote, setVote] = useState<1 | -1 | null>(null);
+interface FeedbackPopoverProps {
+  vote: 1 | -1 | null;
+  text: string;
+  onVote: (vote: 1 | -1) => boolean;
+  onTextChange: (value: string) => void;
+  onSubmit: () => Promise<void> | void;
+  isSubmitting?: boolean;
+  disabled?: boolean;
+  className?: string;
+}
+
+export function FeedbackPopover({
+  vote,
+  text,
+  onVote,
+  onTextChange,
+  onSubmit,
+  isSubmitting = false,
+  disabled = false,
+  className,
+}: FeedbackPopoverProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [text, setText] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [popupPosition, setPopupPosition] = useState({ top: 0, left: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
 
-  // Extract run_id if messageId follows "run-{uuid}" pattern, otherwise "unknown"
-  const runId = messageId.startsWith("run-")
-    ? messageId.replace("run-", "")
-    : "unknown";
-
-  const backendUrl = process.env.NEXT_PUBLIC_VIDEO_BACKEND_URL;
-  const cleanBackendUrl = backendUrl?.endsWith("/")
-    ? backendUrl.slice(0, -1)
-    : backendUrl;
-
-  // Fetch existing feedback on mount
-  useEffect(() => {
-    const fetchFeedback = async () => {
-      if (!threadId || !cleanBackendUrl) return;
-
-      try {
-        const url = new URL(`${cleanBackendUrl}/agent_feedback`);
-        url.searchParams.set("thread_id", threadId);
-        url.searchParams.set("message_id", messageId);
-        url.searchParams.set("actor_type", "user");
-        url.searchParams.set("actor_id", "1");
-
-        const res = await fetch(url.toString());
-        if (res.ok) {
-          const data = await res.json();
-          if (data && typeof data.vote === "number") {
-            setVote(data.vote as 1 | -1);
-            if (data.feedback_text) {
-              setText(data.feedback_text);
-            }
-          }
-        }
-      } catch (e) {
-        console.error("Failed to fetch feedback", e);
-      }
-    };
-
-    fetchFeedback();
-  }, [threadId, messageId, cleanBackendUrl]);
-
-  // Close popup when clicking outside or scrolling
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (
@@ -77,14 +53,13 @@ export function Feedback({ messageId }: FeedbackProps) {
       }
     };
 
-    // Close on scroll to keep it simple, or we'd need to update position on scroll
     const handleScroll = () => {
       if (isOpen) setIsOpen(false);
     };
 
     if (isOpen) {
       document.addEventListener("mousedown", handleClickOutside);
-      window.addEventListener("scroll", handleScroll, true); // Capture phase to catch scroll in any container
+      window.addEventListener("scroll", handleScroll, true);
     }
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
@@ -95,9 +70,8 @@ export function Feedback({ messageId }: FeedbackProps) {
   const updatePosition = () => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
-      // Position above the buttons
       setPopupPosition({
-        top: rect.top + window.scrollY, // rect.top is relative to viewport
+        top: rect.top + window.scrollY,
         left: rect.left + window.scrollX,
       });
     }
@@ -108,86 +82,46 @@ export function Feedback({ messageId }: FeedbackProps) {
     setIsOpen(true);
   };
 
-  const submitFeedback = async (
-    newVote: 1 | -1 | 0,
-    feedbackText: string | null = null,
-  ) => {
-    if (!threadId || !cleanBackendUrl) return;
-
-    try {
-      const payload = {
-        thread_id: threadId,
-        run_id: runId,
-        message_id: messageId,
-        actor_type: "user",
-        actor_id: "1",
-        vote: newVote,
-        feedback_text: feedbackText,
-      };
-
-      const res = await fetch(`${cleanBackendUrl}/agent_feedback`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to submit feedback");
-      }
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to submit feedback");
-    }
-  };
-
-  const handleVote = (newVote: 1 | -1) => {
-    if (vote === newVote) {
-      // Toggle off (undo)
-      setVote(null);
+  const handleVoteClick = (newVote: 1 | -1) => {
+    const shouldOpen = onVote(newVote);
+    if (shouldOpen) {
+      openPopup();
+    } else {
       setIsOpen(false);
-      submitFeedback(0, null); // Send 0 to undo
-      return;
     }
-    setVote(newVote);
-    openPopup();
-    submitFeedback(newVote, text || null);
   };
 
   const handleSubmitText = async () => {
-    if (!vote) return;
-    setIsSubmitting(true);
-    await submitFeedback(vote, text);
-    setIsSubmitting(false);
+    await onSubmit();
     setIsOpen(false);
-    toast.success("Feedback submitted");
   };
 
   return (
     <div
       ref={containerRef}
-      className="relative flex items-center gap-1"
+      className={cn("relative flex items-center gap-1", className)}
     >
       <TooltipIconButton
         variant={vote === 1 ? "secondary" : "ghost"}
         tooltip="Helpful"
-        onClick={() => handleVote(1)}
+        onClick={() => handleVoteClick(1)}
         className={cn(
           vote === 1 &&
             "bg-green-100 text-green-600 hover:bg-green-100 hover:text-green-700 dark:bg-green-900/30 dark:text-green-400",
         )}
+        disabled={disabled}
       >
         <ThumbsUp className="size-4" />
       </TooltipIconButton>
       <TooltipIconButton
         variant={vote === -1 ? "secondary" : "ghost"}
         tooltip="Not helpful"
-        onClick={() => handleVote(-1)}
+        onClick={() => handleVoteClick(-1)}
         className={cn(
           vote === -1 &&
             "bg-red-100 text-red-600 hover:bg-red-100 hover:text-red-700 dark:bg-red-900/30 dark:text-red-400",
         )}
+        disabled={disabled}
       >
         <ThumbsDown className="size-4" />
       </TooltipIconButton>
@@ -219,7 +153,7 @@ export function Feedback({ messageId }: FeedbackProps) {
             </div>
             <Textarea
               value={text}
-              onChange={(e) => setText(e.target.value)}
+              onChange={(event) => onTextChange(event.target.value)}
               placeholder="Tell us more..."
               className="mb-2 min-h-[80px] resize-none text-xs"
               autoFocus
@@ -228,7 +162,7 @@ export function Feedback({ messageId }: FeedbackProps) {
               size="sm"
               className="h-7 w-full text-xs"
               onClick={handleSubmitText}
-              disabled={isSubmitting}
+              disabled={isSubmitting || disabled}
             >
               Submit
             </Button>
@@ -236,5 +170,122 @@ export function Feedback({ messageId }: FeedbackProps) {
           document.body,
         )}
     </div>
+  );
+}
+
+export function Feedback({ messageId }: FeedbackProps) {
+  const { apiId } = useAuth();
+  const [threadId] = useQueryState("threadId");
+  const [vote, setVote] = useState<1 | -1 | null>(null);
+  const [text, setText] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Extract run_id if messageId follows "run-{uuid}" pattern, otherwise "unknown"
+  const runId = messageId.startsWith("run-")
+    ? messageId.replace("run-", "")
+    : "unknown";
+
+  const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
+  const cleanBackendUrl = backendUrl?.endsWith("/")
+    ? backendUrl.slice(0, -1)
+    : backendUrl;
+
+  // Fetch existing feedback on mount
+  useEffect(() => {
+    const fetchFeedback = async () => {
+      if (!threadId || !cleanBackendUrl) return;
+
+      try {
+        const url = new URL(`${cleanBackendUrl}/feedback/message`);
+        url.searchParams.set("thread_id", threadId);
+        url.searchParams.set("message_id", messageId);
+        url.searchParams.set("actor_type", "user");
+        url.searchParams.set("actor_id", "1");
+
+        const res = await fetch(url.toString(), {
+          headers: {
+            ...(apiId && { "x-login-id": apiId }),
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && typeof data.vote === "number") {
+            setVote(data.vote as 1 | -1);
+            if (data.feedback_text) {
+              setText(data.feedback_text);
+            }
+          }
+        }
+      } catch (e) {
+        console.error("Failed to fetch feedback", e);
+      }
+    };
+
+    fetchFeedback();
+  }, [threadId, messageId, cleanBackendUrl, apiId]);
+
+  const submitFeedback = async (
+    newVote: 1 | -1 | 0,
+    feedbackText: string | null = null,
+  ) => {
+    if (!threadId || !cleanBackendUrl) return;
+
+    try {
+      const payload = {
+        thread_id: threadId,
+        run_id: runId,
+        message_id: messageId,
+        actor_type: "user",
+        actor_id: "1",
+        vote: newVote,
+        feedback_text: feedbackText,
+      };
+
+      const res = await fetch(`${cleanBackendUrl}/feedback/message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiId && { "x-login-id": apiId }),
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to submit feedback");
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to submit feedback");
+    }
+  };
+
+  const handleVote = (newVote: 1 | -1) => {
+    if (vote === newVote) {
+      setVote(null);
+      submitFeedback(0, null);
+      return false;
+    }
+    setVote(newVote);
+    submitFeedback(newVote, text || null);
+    return true;
+  };
+
+  const handleSubmitText = async () => {
+    if (!vote) return;
+    setIsSubmitting(true);
+    await submitFeedback(vote, text);
+    setIsSubmitting(false);
+    toast.success("Feedback submitted");
+  };
+
+  return (
+    <FeedbackPopover
+      vote={vote}
+      text={text}
+      onVote={handleVote}
+      onTextChange={setText}
+      onSubmit={handleSubmitText}
+      isSubmitting={isSubmitting}
+    />
   );
 }

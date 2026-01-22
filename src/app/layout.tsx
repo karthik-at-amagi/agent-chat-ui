@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import React from "react";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "next-themes";
@@ -27,6 +28,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className={inter.className}>
+        <Script src="/env.js" strategy="beforeInteractive" />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

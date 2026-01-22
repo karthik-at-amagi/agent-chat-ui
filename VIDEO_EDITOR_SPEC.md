@@ -21,16 +21,24 @@ The right sidebar will now have a toggle or a specific mode for the Video Editor
 
 #### A. Media Pool
 
-- A list/grid of captured video and audio assets.
-- Displays thumbnails and metadata (name, duration).
-- Users can drag assets from the pool to the timeline.
+- A row-based list view of captured video and audio assets.
+- Displays thumbnails and metadata (name, duration, asset ID).
+- Users can click the "+" button to add assets to the timeline or click the row to edit in the Asset Editor.
 - Supports audio-only, video-only, or combined assets.
 
 #### B. Asset Editor (Top Section)
 
 - Contextual editor for the currently selected clip in the Media Pool.
-- **Preview Player**: A video player showing the source asset.
-- **Trimming Controls**: High-precision sliders (e.g., `radix-ui/react-slider`) to adjust `start_time` and `end_time`.
+- **Original Asset Retrieval**: Retrieves the full source movie asset from `/asset_files/[asset_id].video_ext`. The `asset_id` identifies the entire asset.
+- **Preview Player**: A video player showing the full source asset.
+- **Enhanced Trimming Controls**:
+
+  - High-precision sliders (e.g., `radix-ui/react-slider`).
+  - **Dual-tier Sliders**:
+    - **Trim & Seek Slider**: Focuses on the current clip range. Includes a red playhead marker to indicate current playback position.
+    - **View Window Slider**: Controls the "Zoom" or "Pan" of the Trim slider relative to the full asset duration.
+  - Adjustable markers for `clip_start` and `clip_end` that also act as seek buttons.
+
 - **Actions**:
   - "Overwrite": Update the current media pool object with new trim points.
   - "Save as New": Create a new media pool object from the trimmed selection.
@@ -75,6 +83,7 @@ interface TimelineItem extends MediaPoolItem {
 
 - **Visual Style**: Support both dark and light themes, defaulting to system theme, following existing project aesthetics (Tailwind CSS, Lucide icons, Radix UI).
 - **Responsiveness**: The right pane should be resizable or take up a significant portion of the screen (e.g., 40-50% width) when active.
+- **Adjustable Divider**: The vertical divider between the Chat interface and the Video Editor pane must be draggable to allow the user to control the width of both sections.
 - **Timeline Preview**: A dedicated preview player to view the current timeline composition.
 - **Feedback**: Real-time preview of the timeline sequence.
 

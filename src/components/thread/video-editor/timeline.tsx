@@ -10,9 +10,12 @@ import React, {
 import { useVideoEditor, TimelineItem } from "@/providers/VideoEditor";
 import { ArrowLeft, ArrowRight, Trash2, Download, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getRuntimeEnv } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAuth } from "@/providers/Auth";
 
 export function Timeline() {
+  const { apiId } = useAuth();
   const {
     timelineItems,
     removeFromTimeline,
@@ -33,7 +36,7 @@ export function Timeline() {
       return;
     }
 
-    const backendUrl = process.env.NEXT_PUBLIC_VIDEO_BACKEND_URL;
+    const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
     if (!backendUrl) {
       toast.error("Video backend URL is not configured.");
       return;
@@ -55,6 +58,7 @@ export function Timeline() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(apiId && { "x-login-id": apiId }),
         },
         body: JSON.stringify({
           clips,
@@ -76,7 +80,11 @@ export function Timeline() {
         }
 
         // Fetch the file as a blob to force download
-        const fileResponse = await fetch(downloadUrl);
+        const fileResponse = await fetch(downloadUrl, {
+          headers: {
+            ...(apiId && { "x-login-id": apiId }),
+          },
+        });
         if (!fileResponse.ok)
           throw new Error("Failed to download rendered video");
 

@@ -9,12 +9,7 @@ import { useState } from "react";
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { cn } from "@/lib/utils";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   PanelRightOpen,
@@ -24,10 +19,18 @@ import {
   Pencil,
   Check,
   X,
-  Trash2,
+  LogOut,
+  ChevronDown,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { TooltipIconButton } from "../tooltip-icon-button";
+import { useAuth } from "@/providers/Auth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 function ThreadList({
   threads,
@@ -238,6 +241,8 @@ export default function ThreadHistory() {
     deleteThread,
   } = useThreads();
 
+  const { displayName, logout } = useAuth();
+
   const displayedThreads = showHiddenThreads
     ? threads
     : threads.filter((thread) => !hiddenThreadIds.includes(thread.thread_id));
@@ -274,9 +279,31 @@ export default function ThreadHistory() {
               <PanelRightClose className="size-5" />
             )}
           </Button>
-          <h1 className="text-xl font-semibold tracking-tight">
-            Thread History
-          </h1>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="border-muted-foreground/20 hover:border-muted-foreground/40 flex h-auto min-w-0 items-center gap-2 overflow-hidden px-3 py-1 transition-colors"
+              >
+                <span className="truncate text-sm font-medium">
+                  {displayName || "Thread History"}
+                </span>
+                <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-48"
+            >
+              <DropdownMenuItem
+                onClick={() => logout()}
+                className="text-destructive focus:text-destructive cursor-pointer"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Log out</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {hiddenToggleControl}
         {threadsLoading ? (
@@ -306,7 +333,33 @@ export default function ThreadHistory() {
             className="flex flex-col gap-4 lg:hidden"
           >
             <SheetHeader>
-              <SheetTitle>Thread History</SheetTitle>
+              <div className="flex items-center justify-between pr-8">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="border-muted-foreground/20 flex h-auto min-w-0 items-center gap-2 overflow-hidden px-3 py-1"
+                    >
+                      <span className="truncate text-sm font-medium">
+                        {displayName || "Thread History"}
+                      </span>
+                      <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
+                    className="w-48"
+                  >
+                    <DropdownMenuItem
+                      onClick={() => logout()}
+                      className="text-destructive focus:text-destructive cursor-pointer"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Log out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </SheetHeader>
             {hiddenToggleControl}
             <ThreadList
