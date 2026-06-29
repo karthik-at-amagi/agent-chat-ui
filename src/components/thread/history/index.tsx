@@ -8,12 +8,8 @@ import { useState } from "react";
 
 import { getContentString } from "../utils";
 import { useQueryState, parseAsBoolean } from "nuqs";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+import { cn } from "@/lib/utils";
+import { Sheet, SheetContent, SheetHeader } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   PanelRightOpen,
@@ -23,9 +19,19 @@ import {
   Pencil,
   Check,
   X,
+  Trash2,
+  LogOut,
+  ChevronDown,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { TooltipIconButton } from "../tooltip-icon-button";
+import { useAuth } from "@/providers/Auth";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 function ThreadList({
   threads,
@@ -35,6 +41,7 @@ function ThreadList({
   onHideThread,
   onUnhideThread,
   onRenameThread,
+  onDeleteThread,
 }: {
   threads: Thread[];
   hiddenThreadIds: string[];
@@ -43,10 +50,13 @@ function ThreadList({
   onHideThread?: (threadId: string) => void;
   onUnhideThread?: (threadId: string) => void;
   onRenameThread?: (threadId: string, name: string) => Promise<void>;
+  onDeleteThread?: (threadId: string) => Promise<void>;
 }) {
   const [threadId, setThreadId] = useQueryState("threadId");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const { permissions } = useAuth();
+  const hasThreadDelete = permissions.includes("thread_delete");
 
   const handleStartEdit = (t: Thread, currentText: string) => {
     setEditingId(t.thread_id);
@@ -82,7 +92,7 @@ function ThreadList({
         return (
           <div
             key={t.thread_id}
-            className="flex w-full items-center gap-1 px-1"
+            className="group relative flex w-full items-center px-1"
           >
             {isEditing ? (
               <div className="flex min-w-0 flex-1 items-center gap-1">
@@ -112,8 +122,13 @@ function ThreadList({
             ) : (
               <>
                 <Button
-                  variant="ghost"
-                  className="flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-2 overflow-hidden text-left font-normal"
+                  variant={t.thread_id === threadId ? "secondary" : "ghost"}
+                  className={cn(
+                    "flex h-10 w-full min-w-0 flex-1 items-center justify-start gap-2 overflow-hidden text-left font-normal transition-all",
+                    t.thread_id === threadId
+                      ? "bg-secondary pr-20"
+                      : "group-hover:pr-20",
+                  )}
                   onClick={(e) => {
                     e.preventDefault();
                     onThreadClick?.(t.thread_id);
@@ -131,7 +146,13 @@ function ThreadList({
                   )}
                 </Button>
 
-                <div className="flex shrink-0">
+                <div
+                  className={cn(
+                    "absolute right-2 flex shrink-0 transition-opacity",
+                    t.thread_id !== threadId &&
+                      "opacity-0 group-hover:opacity-100",
+                  )}
+                >
                   <TooltipIconButton
                     tooltip="Rename thread"
                     onClick={(e) => {
@@ -161,6 +182,26 @@ function ThreadList({
                       <EyeOff className="h-4 w-4" />
                     )}
                   </TooltipIconButton>
+
+                  {hasThreadDelete && (
+                    <TooltipIconButton
+                      tooltip="Delete thread"
+                      className="hover:text-destructive"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (
+                          window.confirm(
+                            "Are you sure you want to delete this thread?",
+                          )
+                        ) {
+                          onDeleteThread?.(t.thread_id);
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </TooltipIconButton>
+                  )}
                 </div>
               </>
             )}
@@ -202,7 +243,10 @@ export default function ThreadHistory() {
     hideThread,
     unhideThread,
     renameThread,
+    deleteThread,
   } = useThreads();
+
+  const { displayName, logout } = useAuth();
 
   const displayedThreads = showHiddenThreads
     ? threads
@@ -240,9 +284,31 @@ export default function ThreadHistory() {
               <PanelRightClose className="size-5" />
             )}
           </Button>
-          <h1 className="text-xl font-semibold tracking-tight">
-            Thread History
-          </h1>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                className="border-muted-foreground/20 hover:border-muted-foreground/40 flex h-auto min-w-0 items-center gap-2 overflow-hidden px-3 py-1 transition-colors"
+              >
+                <span className="truncate text-sm font-medium">
+                  {displayName || "Thread History"}
+                </span>
+                <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="end"
+              className="w-48"
+            >
+              <DropdownMenuItem
+                onClick={() => logout()}
+                className="text-destructive focus:text-destructive cursor-pointer"
+              >
+                <LogOut className="mr-2 h-4 w-4" />
+                <span>Log out</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         {hiddenToggleControl}
         {threadsLoading ? (
@@ -255,6 +321,7 @@ export default function ThreadHistory() {
             onHideThread={hideThread}
             onUnhideThread={unhideThread}
             onRenameThread={renameThread}
+            onDeleteThread={deleteThread}
           />
         )}
       </div>
@@ -271,7 +338,33 @@ export default function ThreadHistory() {
             className="flex flex-col gap-4 lg:hidden"
           >
             <SheetHeader>
-              <SheetTitle>Thread History</SheetTitle>
+              <div className="flex items-center justify-between pr-8">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="border-muted-foreground/20 flex h-auto min-w-0 items-center gap-2 overflow-hidden px-3 py-1"
+                    >
+                      <span className="truncate text-sm font-medium">
+                        {displayName || "Thread History"}
+                      </span>
+                      <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="start"
+                    className="w-48"
+                  >
+                    <DropdownMenuItem
+                      onClick={() => logout()}
+                      className="text-destructive focus:text-destructive cursor-pointer"
+                    >
+                      <LogOut className="mr-2 h-4 w-4" />
+                      <span>Log out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </SheetHeader>
             {hiddenToggleControl}
             <ThreadList
@@ -282,6 +375,7 @@ export default function ThreadHistory() {
               onHideThread={hideThread}
               onUnhideThread={unhideThread}
               onRenameThread={renameThread}
+              onDeleteThread={deleteThread}
             />
           </SheetContent>
         </Sheet>

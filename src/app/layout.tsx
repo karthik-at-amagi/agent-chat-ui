@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Inter } from "next/font/google";
+import Script from "next/script";
 import React from "react";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
 import { ThemeProvider } from "next-themes";
@@ -12,8 +13,8 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Agentic Search",
-  description: "Agentic Search by Amagi Media Labs",
+  title: "Video Lens",
+  description: "Video Lens by Amagi Media Labs",
 };
 
 export default function RootLayout({
@@ -27,6 +28,10 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className={inter.className}>
+        <Script
+          src="/env.js"
+          strategy="beforeInteractive"
+        />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

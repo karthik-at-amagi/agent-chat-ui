@@ -14,6 +14,8 @@ import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
 import { useArtifact } from "../artifact";
+import { Feedback } from "./feedback";
+import { useAuth } from "@/providers/Auth";
 
 function CustomComponent({
   message,
@@ -111,8 +113,12 @@ export function AssistantMessage({
   const contentString = getContentString(content);
   const [hideToolCalls] = useQueryState(
     "hideToolCalls",
-    parseAsBoolean.withDefault(false),
+    parseAsBoolean.withDefault(true),
   );
+
+  const { permissions } = useAuth();
+  const hasToolView = permissions.includes("tool_view");
+  const effectiveHideToolCalls = hasToolView ? hideToolCalls : true;
 
   const thread = useStreamContext();
   const messages = thread.messages;
@@ -146,7 +152,29 @@ export function AssistantMessage({
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
-  if (isToolResult && hideToolCalls) {
+  const customComponents = thread.values.ui?.filter(
+    (ui) => ui.metadata?.message_id === message?.id,
+  );
+  const hasCustomComponents = customComponents && customComponents.length > 0;
+
+  const hasVisibleInterrupt =
+    !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
+
+  const WHITELISTED_TOOLS = ["show_clips"];
+  const isWhitelistedToolResult =
+    message?.type === "tool" && WHITELISTED_TOOLS.includes(message.name || "");
+
+  if (isToolResult && effectiveHideToolCalls && !isWhitelistedToolResult) {
+    return null;
+  }
+
+  if (
+    !isToolResult &&
+    effectiveHideToolCalls &&
+    contentString.length === 0 &&
+    !hasCustomComponents &&
+    !hasVisibleInterrupt
+  ) {
     return null;
   }
 
@@ -170,7 +198,7 @@ export function AssistantMessage({
               </div>
             )}
 
-            {!hideToolCalls && (
+            {!effectiveHideToolCalls && (
               <>
                 {(hasToolCalls && toolCallsHaveContents && (
                   <ToolCalls toolCalls={message.tool_calls} />
@@ -195,12 +223,7 @@ export function AssistantMessage({
               isLastMessage={isLastMessage}
               hasNoAIOrToolMessages={hasNoAIOrToolMessages}
             />
-            <div
-              className={cn(
-                "mr-auto flex items-center gap-2 transition-opacity",
-                "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100",
-              )}
-            >
+            <div className="mr-auto flex items-center gap-2">
               <BranchSwitcher
                 branch={meta?.branch}
                 branchOptions={meta?.branchOptions}
@@ -213,6 +236,7 @@ export function AssistantMessage({
                 isAiMessage={true}
                 handleRegenerate={() => handleRegenerate(parentCheckpoint)}
               />
+              {message?.id && <Feedback messageId={message.id} />}
             </div>
           </>
         )}

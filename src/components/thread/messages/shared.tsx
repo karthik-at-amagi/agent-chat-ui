@@ -212,6 +212,7 @@ export function CommandBar({
           onClick={() => {
             setIsEditing?.(true);
           }}
+          className="hidden" // Hiding edit button for now
         >
           <Pencil />
         </TooltipIconButton>
