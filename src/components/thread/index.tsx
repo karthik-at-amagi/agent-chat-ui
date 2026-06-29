@@ -480,13 +480,13 @@ export function Thread() {
                   >
                     <Image
                       src="/logo.png"
-                      alt="Agentic Search Mascot Picky"
+                      alt="Video Lens Mascot Picky"
                       width={45}
                       height={45}
                       className="rounded-lg"
                     />
                     <span className="text-xl font-semibold tracking-tight">
-                      Agentic Search
+                      Video Lens
                     </span>
                   </motion.button>
                 </div>
@@ -578,13 +578,13 @@ export function Thread() {
                       <div className="flex items-center gap-3">
                         <Image
                           src="/logo.png"
-                          alt="Agentic Search Logo"
+                          alt="Video Lens Logo"
                           width={60}
                           height={60}
                           className="rounded-xl"
                         />
                         <h1 className="text-2xl font-semibold tracking-tight">
-                          Agentic Search
+                          Video Lens
                         </h1>
                       </div>
                     )}

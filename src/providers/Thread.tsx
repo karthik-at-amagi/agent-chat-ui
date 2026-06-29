@@ -9,6 +9,7 @@ import {
   useCallback,
   useState,
   useEffect,
+  useRef,
   Dispatch,
   SetStateAction,
 } from "react";
@@ -66,25 +67,35 @@ function getThreadSearchMetadataFilters(assistantId: string) {
 }
 
 export function ThreadProvider({ children }: { children: ReactNode }) {
-  const envApiUrl: string | undefined = getRuntimeEnv("NEXT_PUBLIC_API_URL");
   const envAssistantId: string | undefined = getRuntimeEnv(
     "NEXT_PUBLIC_ASSISTANT_ID",
   );
+  const envVideoBackendUrl: string | undefined = getRuntimeEnv(
+    "NEXT_PUBLIC_VIDEO_BACKEND_URL",
+  );
+  const envDemo: string | undefined = getRuntimeEnv("DEMO");
 
   const { apiId } = useAuth();
 
-  const [apiUrl] = useQueryState("apiUrl", {
-    defaultValue: envApiUrl || "",
-  });
-  const [assistantId] = useQueryState("assistantId", {
-    defaultValue: envAssistantId || "",
-  });
+  const [apiUrl] = useQueryState("apiUrl");
+  const [assistantId] = useQueryState("assistantId");
+
+  const finalApiUrl =
+    apiUrl || (envDemo === "true" ? envVideoBackendUrl : undefined);
+  const finalAssistantId =
+    assistantId || (envDemo === "true" ? envAssistantId : undefined);
+
+  const cleanBackendUrl = envVideoBackendUrl?.endsWith("/")
+    ? envVideoBackendUrl.slice(0, -1)
+    : envVideoBackendUrl;
+
   const [threadId, setThreadId] = useQueryState("threadId");
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
   const [hiddenThreadIds, setHiddenThreadIds] = useState<string[]>(() =>
     readHiddenThreadIdsFromStorage(),
   );
+  const inFlightThreadsRequestRef = useRef<Promise<Thread[]> | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -122,8 +133,8 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const renameThread = useCallback(
     async (targetId: string, name: string) => {
-      if (!apiUrl || !targetId) return;
-      const client = createClient(apiUrl, getApiKey() ?? undefined, apiId);
+      if (!finalApiUrl || !targetId) return;
+      const client = createClient(finalApiUrl, getApiKey() ?? undefined, apiId);
       const thread = threads.find((t) => t.thread_id === targetId);
       const newMetadata = { ...(thread?.metadata || {}), name };
       await client.threads.update(targetId, { metadata: newMetadata });
@@ -133,51 +144,95 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
         ),
       );
     },
-    [apiUrl, threads, setThreads, apiId],
+    [finalApiUrl, threads, setThreads, apiId],
   );
 
   const deleteThread = useCallback(
     async (targetId: string) => {
-      if (!apiUrl || !targetId) return;
-      const client = createClient(apiUrl, getApiKey() ?? undefined, apiId);
+      if (!finalApiUrl || !targetId) return;
+      const client = createClient(finalApiUrl, getApiKey() ?? undefined, apiId);
       await client.threads.delete(targetId);
       setThreads((prev) => prev.filter((t) => t.thread_id !== targetId));
       if (threadId === targetId) {
         setThreadId(null);
       }
     },
-    [apiUrl, threadId, setThreadId, setThreads, apiId],
+    [finalApiUrl, threadId, setThreadId, setThreads, apiId],
   );
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
-    if (!apiUrl || !assistantId) return [];
-    const client = createClient(apiUrl, getApiKey() ?? undefined, apiId);
-    const metadataFilters = getThreadSearchMetadataFilters(assistantId);
-
-    if (metadataFilters.length === 0) return [];
-
-    const results = await Promise.all(
-      metadataFilters.map((metadata) =>
-        client.threads.search({
-          metadata,
-          limit: 100,
-        }),
-      ),
-    );
-
-    const dedupedThreads: Thread[] = [];
-    const seenIds = new Set<string>();
-
-    for (const threadList of results) {
-      for (const thread of threadList) {
-        if (seenIds.has(thread.thread_id)) continue;
-        seenIds.add(thread.thread_id);
-        dedupedThreads.push(thread);
-      }
+    if (inFlightThreadsRequestRef.current) {
+      return inFlightThreadsRequestRef.current;
     }
 
-    return dedupedThreads;
-  }, [apiUrl, assistantId, apiId]);
+    if (!finalApiUrl || !finalAssistantId) return [];
+    const request = (async () => {
+      const client = createClient(finalApiUrl, getApiKey() ?? undefined, apiId);
+      const metadataFilters = getThreadSearchMetadataFilters(finalAssistantId);
+
+      if (metadataFilters.length === 0) return [];
+
+      const results = await Promise.all(
+        metadataFilters.map((metadata) =>
+          client.threads.search({
+            metadata,
+            limit: 100,
+          }),
+        ),
+      );
+
+      const dedupedThreads: Thread[] = [];
+      const seenIds = new Set<string>();
+
+      for (const threadList of results) {
+        for (const thread of threadList) {
+          if (seenIds.has(thread.thread_id)) continue;
+          seenIds.add(thread.thread_id);
+          dedupedThreads.push(thread);
+        }
+      }
+
+      if (!cleanBackendUrl || !apiId) {
+        return [];
+      }
+
+      try {
+        const res = await fetch(`${cleanBackendUrl}/threads/verify`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-login-id": apiId,
+          },
+          body: JSON.stringify({
+            thread_ids: dedupedThreads.map((thread) => thread.thread_id),
+          }),
+        });
+
+        if (!res.ok) {
+          return [];
+        }
+
+        const data = (await res.json()) as { owned_thread_ids?: string[] };
+        const ownedIds = new Set(data.owned_thread_ids ?? []);
+        return dedupedThreads.filter((thread) =>
+          ownedIds.has(thread.thread_id),
+        );
+      } catch (err) {
+        console.error(err);
+        return [];
+      }
+    })();
+
+    inFlightThreadsRequestRef.current = request;
+
+    try {
+      return await request;
+    } finally {
+      if (inFlightThreadsRequestRef.current === request) {
+        inFlightThreadsRequestRef.current = null;
+      }
+    }
+  }, [finalApiUrl, finalAssistantId, apiId, cleanBackendUrl]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

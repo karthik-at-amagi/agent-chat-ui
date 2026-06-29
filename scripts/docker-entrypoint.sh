@@ -8,7 +8,12 @@ window.__ENV__ = {
   NEXT_PUBLIC_VIDEO_BACKEND_URL: "${NEXT_PUBLIC_VIDEO_BACKEND_URL:-}",
   NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-}",
   NEXT_PUBLIC_ASSISTANT_ID: "${NEXT_PUBLIC_ASSISTANT_ID:-}",
+  DEMO: "${DEMO:-}",
 };
 EOF
 
-exec "$@"
+if [ -n "$PORT" ]; then
+  exec "$@" -p "$PORT"
+else
+  exec "$@"
+fi

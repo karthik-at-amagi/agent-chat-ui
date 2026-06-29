@@ -1,7 +1,14 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
 import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp, PlusCircle, Download } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  PlusCircle,
+  Download,
+  MoveHorizontal,
+  X,
+} from "lucide-react";
 import { getRuntimeEnv } from "@/lib/utils";
 import { useVideoEditor } from "@/providers/VideoEditor";
 import { Button } from "@/components/ui/button";
@@ -131,6 +138,24 @@ const MAX_LINES = 2;
 const MAX_JSON_ITEMS = 0;
 const CLIP_FEEDBACK_WHITELISTED_TOOLS = ["show_clips"];
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function removeMediaFragment(url: string): string {
+  return url.split("#")[0];
+}
+
+function buildMediaFragmentUrl(
+  url: string,
+  start: number,
+  end: number,
+): string {
+  const safeStart = Math.max(0, start);
+  const safeEnd = Math.max(safeStart + 0.1, end);
+  return `${removeMediaFragment(url)}#t=${safeStart},${safeEnd}`;
+}
+
 function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -152,6 +177,12 @@ export function ToolResult({ message }: { message: ToolMessage }) {
   const [activeFeedbackClipId, setActiveFeedbackClipId] = useState<
     string | null
   >(null);
+  const [expandedClipState, setExpandedClipState] = useState<{
+    clip: any;
+    start: number;
+    end: number;
+    maxEnd: number | null;
+  } | null>(null);
 
   let parsedContent: any;
   let isJsonContent = false;
@@ -190,7 +221,11 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     : backendUrl;
 
   const resolvedVideoClips = videoClips.map((clip) => {
-    const extension = clip.video_url?.split(".").pop() || "mp4";
+    const videoUrlWithoutFragment =
+      typeof clip.video_url === "string"
+        ? removeMediaFragment(clip.video_url).split("?")[0]
+        : "";
+    const extension = videoUrlWithoutFragment.split(".").pop() || "mp4";
     const fullAssetUrl = cleanBackendUrl
       ? `${cleanBackendUrl}/asset_files/${clip.asset_id}.${extension}`
       : clip.video_url;
@@ -384,6 +419,103 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     toast.success("Feedback submitted");
   };
 
+  const handleDownloadClip = async (
+    displayUrl: string | undefined,
+    assetId: string,
+  ) => {
+    try {
+      if (!displayUrl) {
+        throw new Error("Missing clip URL");
+      }
+      const response = await fetch(displayUrl, {
+        headers: {
+          ...(apiId && { "x-login-id": apiId }),
+        },
+      });
+      if (!response.ok) throw new Error("Failed to download video");
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `clip-${assetId}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 100);
+      toast.success("Download started");
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to download video");
+    }
+  };
+
+  const openExpandedClip = (clip: any) => {
+    const maxEnd =
+      typeof clip.duration === "number" && clip.duration > 0
+        ? clip.duration
+        : null;
+    const initialStart = Math.max(0, clip.clip_start - 10);
+    const rawEnd = clip.clip_end + 10;
+    const initialEnd =
+      maxEnd !== null ? clamp(rawEnd, initialStart + 0.1, maxEnd) : rawEnd;
+    setExpandedClipState({
+      clip,
+      start: initialStart,
+      end: initialEnd,
+      maxEnd,
+    });
+  };
+
+  const adjustExpandedStart = (delta: number) => {
+    if (!expandedClipState) return;
+    const nextStart = clamp(
+      expandedClipState.start + delta,
+      0,
+      expandedClipState.end - 0.1,
+    );
+    setExpandedClipState({
+      ...expandedClipState,
+      start: nextStart,
+    });
+  };
+
+  const adjustExpandedEnd = (delta: number) => {
+    if (!expandedClipState) return;
+    const upperBound = expandedClipState.maxEnd ?? Number.POSITIVE_INFINITY;
+    const nextEnd = clamp(
+      expandedClipState.end + delta,
+      expandedClipState.start + 0.1,
+      upperBound,
+    );
+    setExpandedClipState({
+      ...expandedClipState,
+      end: nextEnd,
+    });
+  };
+
+  const expandedPreviewUrl = useMemo(() => {
+    if (!expandedClipState) return null;
+    const baseUrl =
+      expandedClipState.clip.fullAssetUrl || expandedClipState.clip.displayUrl;
+    if (!baseUrl) return null;
+    return buildMediaFragmentUrl(
+      baseUrl,
+      expandedClipState.start,
+      expandedClipState.end,
+    );
+  }, [expandedClipState]);
+
+  useEffect(() => {
+    if (!expandedClipState) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setExpandedClipState(null);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [expandedClipState]);
+
   return (
     <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
       <div className="border-border overflow-hidden rounded-lg border">
@@ -428,11 +560,11 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                         src={clip.displayUrl}
                       />
                     )}
-                    <div className="flex w-full gap-2">
+                    <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 items-center gap-2 text-xs"
+                        className="items-center gap-2 text-xs"
                         onClick={() => {
                           addToMediaPool({
                             assetId: clip.asset_id,
@@ -452,37 +584,25 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 items-center gap-2 text-xs"
+                        className="items-center gap-2 text-xs"
                         onClick={async () => {
-                          try {
-                            const response = await fetch(clip.displayUrl, {
-                              headers: {
-                                ...(apiId && { "x-login-id": apiId }),
-                              },
-                            });
-                            if (!response.ok)
-                              throw new Error("Failed to download video");
-                            const blob = await response.blob();
-                            const blobUrl = window.URL.createObjectURL(blob);
-                            const link = document.createElement("a");
-                            link.href = blobUrl;
-                            link.download = `clip-${clip.asset_id}.mp4`;
-                            document.body.appendChild(link);
-                            link.click();
-                            document.body.removeChild(link);
-                            setTimeout(
-                              () => window.URL.revokeObjectURL(blobUrl),
-                              100,
-                            );
-                            toast.success("Download started");
-                          } catch (e) {
-                            console.error(e);
-                            toast.error("Failed to download video");
-                          }
+                          await handleDownloadClip(
+                            clip.displayUrl,
+                            clip.asset_id,
+                          );
                         }}
                       >
                         <Download className="size-3" />
                         Download
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="items-center gap-2 text-xs sm:col-span-2"
+                        onClick={() => openExpandedClip(clip)}
+                      >
+                        <MoveHorizontal className="size-3" />
+                        extend by 10 seconds
                       </Button>
                     </div>
                     <div className="bg-muted/50 flex flex-col gap-1 rounded p-2 font-mono text-xs">
@@ -591,6 +711,126 @@ export function ToolResult({ message }: { message: ToolMessage }) {
           )}
         </motion.div>
       </div>
+      {expandedClipState && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-background w-full max-w-2xl rounded-xl border shadow-xl">
+            <div className="border-border flex items-center justify-between border-b px-4 py-3">
+              <h4 className="text-sm font-semibold">Expanded Clip</h4>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setExpandedClipState(null)}
+                aria-label="Close expanded clip"
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+            <div className="space-y-4 p-4">
+              {expandedPreviewUrl && (
+                <video
+                  key={expandedPreviewUrl}
+                  controls
+                  className="aspect-video w-full rounded-lg bg-black object-contain"
+                  src={expandedPreviewUrl}
+                />
+              )}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="bg-muted/40 space-y-2 rounded-lg border p-3">
+                  <div className="text-sm font-medium">Start</div>
+                  <div className="text-muted-foreground font-mono text-xs">
+                    {formatTime(expandedClipState.start)} (
+                    {expandedClipState.start.toFixed(1)}s)
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => adjustExpandedStart(-10)}
+                    >
+                      -10s
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => adjustExpandedStart(10)}
+                    >
+                      +10s
+                    </Button>
+                  </div>
+                </div>
+                <div className="bg-muted/40 space-y-2 rounded-lg border p-3">
+                  <div className="text-sm font-medium">End</div>
+                  <div className="text-muted-foreground font-mono text-xs">
+                    {formatTime(expandedClipState.end)} (
+                    {expandedClipState.end.toFixed(1)}s)
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => adjustExpandedEnd(-10)}
+                    >
+                      -10s
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => adjustExpandedEnd(10)}
+                    >
+                      +10s
+                    </Button>
+                  </div>
+                </div>
+              </div>
+              <div className="flex w-full gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 items-center gap-2"
+                  onClick={() => {
+                    addToMediaPool({
+                      assetId: expandedClipState.clip.asset_id,
+                      fullAssetUrl: expandedClipState.clip.fullAssetUrl,
+                      name:
+                        expandedClipState.clip.name ||
+                        message.name ||
+                        "Video Clip",
+                      type: "video",
+                      start: expandedClipState.start,
+                      end: expandedClipState.end,
+                      duration:
+                        expandedClipState.clip.duration ||
+                        expandedClipState.end,
+                    });
+                    toast.success("Expanded clip added to Media Pool");
+                  }}
+                >
+                  <PlusCircle className="size-3" />
+                  Send to pool
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 items-center gap-2"
+                  onClick={async () => {
+                    await handleDownloadClip(
+                      expandedClipState.clip.displayUrl,
+                      expandedClipState.clip.asset_id,
+                    );
+                  }}
+                >
+                  <Download className="size-3" />
+                  Download
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

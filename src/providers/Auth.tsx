@@ -138,17 +138,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
             <div className="flex flex-col items-center gap-3">
               <Image
                 src="/logo.png"
-                alt="Agentic Search Logo"
+                alt="Video Lens Logo"
                 width={64}
                 height={64}
                 className="rounded-2xl shadow-sm"
               />
               <h1 className="text-foreground text-2xl font-bold tracking-tight">
-                Agentic Search
+                Video Lens
               </h1>
             </div>
             <p className="text-muted-foreground text-sm">
-              Please enter your API Token to continue.
+              Please enter your access key to continue.
             </p>
           </div>
           <form
@@ -168,13 +168,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
                 htmlFor="apiId"
                 className="text-sm font-medium"
               >
-                API Token
+                Access key
               </Label>
               <div className="relative">
                 <PasswordInput
                   id="apiId"
                   name="apiId"
-                  placeholder="Enter your API token"
+                  placeholder="Enter your access key"
                   required
                   autoFocus
                   className="bg-background h-11"

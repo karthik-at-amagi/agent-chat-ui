@@ -10,12 +10,14 @@ declare global {
 type RuntimeEnvKey =
   | "NEXT_PUBLIC_VIDEO_BACKEND_URL"
   | "NEXT_PUBLIC_API_URL"
-  | "NEXT_PUBLIC_ASSISTANT_ID";
+  | "NEXT_PUBLIC_ASSISTANT_ID"
+  | "DEMO";
 
 const buildTimeEnv: Record<RuntimeEnvKey, string | undefined> = {
   NEXT_PUBLIC_VIDEO_BACKEND_URL: process.env.NEXT_PUBLIC_VIDEO_BACKEND_URL,
   NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   NEXT_PUBLIC_ASSISTANT_ID: process.env.NEXT_PUBLIC_ASSISTANT_ID,
+  DEMO: process.env.DEMO,
 };
 
 export function getRuntimeEnv(key: RuntimeEnvKey) {

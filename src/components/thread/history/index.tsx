@@ -19,6 +19,7 @@ import {
   Pencil,
   Check,
   X,
+  Trash2,
   LogOut,
   ChevronDown,
 } from "lucide-react";
@@ -54,6 +55,8 @@ function ThreadList({
   const [threadId, setThreadId] = useQueryState("threadId");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const { permissions } = useAuth();
+  const hasThreadDelete = permissions.includes("thread_delete");
 
   const handleStartEdit = (t: Thread, currentText: string) => {
     setEditingId(t.thread_id);
@@ -180,23 +183,25 @@ function ThreadList({
                     )}
                   </TooltipIconButton>
 
-                  {/* <TooltipIconButton
-                    tooltip="Delete thread"
-                    className="hover:text-destructive"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      if (
-                        window.confirm(
-                          "Are you sure you want to delete this thread?",
-                        )
-                      ) {
-                        onDeleteThread?.(t.thread_id);
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </TooltipIconButton> */}
+                  {hasThreadDelete && (
+                    <TooltipIconButton
+                      tooltip="Delete thread"
+                      className="hover:text-destructive"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (
+                          window.confirm(
+                            "Are you sure you want to delete this thread?",
+                          )
+                        ) {
+                          onDeleteThread?.(t.thread_id);
+                        }
+                      }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </TooltipIconButton>
+                  )}
                 </div>
               </>
             )}
