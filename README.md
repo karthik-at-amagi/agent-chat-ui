@@ -57,6 +57,14 @@ NEXT_PUBLIC_API_URL=http://localhost:2024
 NEXT_PUBLIC_ASSISTANT_ID=agent
 ```
 
+For demo deployments, you can also set `DEMO=true`. In demo mode, the app skips the setup form by using `NEXT_PUBLIC_VIDEO_BACKEND_URL` as the API URL and `NEXT_PUBLIC_ASSISTANT_ID` as the assistant ID when URL parameters are not provided.
+
+```bash
+DEMO=true
+NEXT_PUBLIC_VIDEO_BACKEND_URL=http://localhost:8000
+NEXT_PUBLIC_ASSISTANT_ID=agent
+```
+
 ## Video Rendering in Tool Calls
 
 If a tool call response contains a `video_url` field (e.g., `{"video_url": "/static/video.mp4"}`), the UI will automatically render a video player.
