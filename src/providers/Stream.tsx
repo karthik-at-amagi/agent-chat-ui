@@ -122,6 +122,9 @@ const StreamSession = ({
     threadId: threadId ?? null,
     fetchStateHistory: true,
     reconnectOnMount: true,
+    // Surface events from subagents (e.g. the transition subagent invoked by
+    // finalize_promo) so their tool activity is visible in the run stream.
+    streamSubgraphs: true,
     defaultHeaders: apiId ? { "x-login-id": apiId } : undefined,
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
