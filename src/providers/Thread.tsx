@@ -267,7 +267,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
     const intervalId = window.setInterval(() => {
       void refresh(false);
-    }, 5000);
+    }, 60000);
 
     window.addEventListener("visibilitychange", handleVisibility);
     window.addEventListener("focus", handleFocus);

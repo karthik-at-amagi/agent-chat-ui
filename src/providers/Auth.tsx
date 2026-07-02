@@ -19,7 +19,8 @@ interface AuthContextType {
   apiId: string | null;
   displayName: string | null;
   permissions: string[];
-  setApiId: (id: string, displayName?: string, permissions?: string[]) => void;
+  accountId: string | null;
+  setApiId: (id: string, displayName?: string, permissions?: string[], accountId?: string) => void;
   logout: () => void;
 }
 
@@ -31,6 +32,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
   const [apiId, setInternalApiId] = useState<string | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +45,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     const storedPermissions = window.localStorage.getItem(
       "lg:chat:permissions",
     );
+    const storedAccountId = window.localStorage.getItem("lg:chat:accountId");
 
     if (storedApiId && !storedDisplayName) {
       // Force re-login if we have a token but no display name (migration)
@@ -50,6 +53,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     } else {
       setInternalApiId(storedApiId);
       setDisplayName(storedDisplayName);
+      setAccountId(storedAccountId);
       if (storedPermissions) {
         try {
           setPermissions(JSON.parse(storedPermissions));
@@ -61,7 +65,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     setIsLoaded(true);
   }, []);
 
-  const setApiId = (id: string, name?: string, perms?: string[]) => {
+  const setApiId = (id: string, name?: string, perms?: string[], acctId?: string) => {
     saveApiId(id);
     if (name) {
       window.localStorage.setItem("lg:chat:displayName", name);
@@ -71,6 +75,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
       window.localStorage.setItem("lg:chat:permissions", JSON.stringify(perms));
       setPermissions(perms);
     }
+    if (acctId) {
+      window.localStorage.setItem("lg:chat:accountId", acctId);
+      setAccountId(acctId);
+    }
     setInternalApiId(id);
   };
 
@@ -78,9 +86,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     saveApiId(null);
     window.localStorage.removeItem("lg:chat:displayName");
     window.localStorage.removeItem("lg:chat:permissions");
+    window.localStorage.removeItem("lg:chat:accountId");
     setInternalApiId(null);
     setDisplayName(null);
     setPermissions([]);
+    setAccountId(null);
   };
 
   const handleVerify = async (id: string) => {
@@ -109,11 +119,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
       if (res.ok) {
         const data = await res.json();
-        // Use display_name, fallback to identity, then to the id itself
         setApiId(
           id,
           data.display_name || data.identity || id,
           data.permissions || [],
+          data.x_account_id || undefined,
         );
       } else {
         setError("auth failed check your api key");
@@ -214,7 +224,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
 
   return (
     <AuthContext.Provider
-      value={{ apiId, displayName, permissions, setApiId, logout }}
+      value={{ apiId, displayName, permissions, accountId, setApiId, logout }}
     >
       {children}
     </AuthContext.Provider>
