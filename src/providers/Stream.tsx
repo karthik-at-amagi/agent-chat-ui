@@ -34,13 +34,31 @@ import { useAuth } from "./Auth";
 
 export type StateType = { messages: Message[]; ui?: UIMessage[] };
 
+export interface PromoSpine {
+  label: string;
+  type: string;
+  premise: string;
+  trajectory: string[];
+  ends_on: string;
+  grounding: string;
+}
+
+export interface MCPElicitationEvent {
+  type: "mcp_elicitation_request";
+  elicitation_id: string;
+  server_name: string;
+  tool_name: string;
+  text: string;
+  spines_json: string;
+}
+
 type StreamBag = {
   UpdateType: {
     messages?: Message[] | Message | string;
     ui?: (UIMessage | RemoveUIMessage)[] | UIMessage | RemoveUIMessage;
     context?: Record<string, unknown>;
   };
-  CustomEventType: UIMessage | RemoveUIMessage;
+  CustomEventType: UIMessage | RemoveUIMessage | MCPElicitationEvent;
 };
 
 const useTypedStream: (
@@ -49,6 +67,15 @@ const useTypedStream: (
 
 type StreamContextType = ReturnType<typeof useTypedStream>;
 const StreamContext = createContext<StreamContextType | undefined>(undefined);
+
+interface ElicitationContextType {
+  pendingElicitation: MCPElicitationEvent | null;
+  clearElicitation: () => void;
+}
+const ElicitationContext = createContext<ElicitationContextType>({
+  pendingElicitation: null,
+  clearElicitation: () => {},
+});
 
 async function checkGraphStatus(
   apiUrl: string,
@@ -102,12 +129,14 @@ const StreamSession = ({
   apiUrl,
   assistantId,
   apiId,
+  accountId,
 }: {
   children: ReactNode;
   apiKey: string | null;
   apiUrl: string;
   assistantId: string;
   apiId: string | null;
+  accountId: string | null;
 }) => {
   const [threadId, setThreadId] = useQueryState("threadId");
   const { getThreads, setThreads } = useThreads();
@@ -115,6 +144,9 @@ const StreamSession = ({
   const cleanBackendUrl = backendUrl?.endsWith("/")
     ? backendUrl.slice(0, -1)
     : backendUrl;
+  const [pendingElicitation, setPendingElicitation] =
+    useState<MCPElicitationEvent | null>(null);
+  const clearElicitation = () => setPendingElicitation(null);
   const streamValue = useTypedStream({
     apiUrl,
     apiKey: apiKey ?? undefined,
@@ -122,16 +154,21 @@ const StreamSession = ({
     threadId: threadId ?? null,
     fetchStateHistory: true,
     reconnectOnMount: true,
+    defaultHeaders: {
+      ...(apiId ? { "x-login-id": apiId } : {}),
+      ...(accountId ? { "x-account-id": accountId } : {}),
+    },
     // Surface events from subagents (e.g. the transition subagent invoked by
     // finalize_promo) so their tool activity is visible in the run stream.
     streamSubgraphs: true,
-    defaultHeaders: apiId ? { "x-login-id": apiId } : undefined,
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev: StateType) => {
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
+      } else if ((event as MCPElicitationEvent).type === "mcp_elicitation_request") {
+        setPendingElicitation(event as MCPElicitationEvent);
       }
     },
     onThreadId: (id: string) => {
@@ -160,9 +197,11 @@ const StreamSession = ({
   }, [apiKey, apiUrl, apiId]);
 
   return (
-    <StreamContext.Provider value={streamValue}>
-      {children}
-    </StreamContext.Provider>
+    <ElicitationContext.Provider value={{ pendingElicitation, clearElicitation }}>
+      <StreamContext.Provider value={streamValue}>
+        {children}
+      </StreamContext.Provider>
+    </ElicitationContext.Provider>
   );
 };
 
@@ -183,7 +222,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
   );
   const envDemo: string | undefined = getRuntimeEnv("DEMO");
 
-  const { apiId } = useAuth();
+  const { apiId, accountId } = useAuth();
 
   // Use URL params with env var fallbacks
   const [apiUrl, setApiUrl] = useQueryState("apiUrl");
@@ -321,6 +360,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
       apiUrl={finalApiUrl}
       assistantId={finalAssistantId}
       apiId={apiId}
+      accountId={accountId}
     >
       {children}
     </StreamSession>
@@ -335,5 +375,8 @@ export const useStreamContext = (): StreamContextType => {
   }
   return context;
 };
+
+export const useElicitation = (): ElicitationContextType =>
+  useContext(ElicitationContext);
 
 export default StreamContext;

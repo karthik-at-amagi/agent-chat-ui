@@ -58,6 +58,8 @@ import {
   useArtifactContext,
 } from "./artifact";
 import { useAuth } from "@/providers/Auth";
+import { useElicitation, type PromoSpine } from "@/providers/Stream";
+import { SpinePickerView } from "./spine-picker";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -226,6 +228,7 @@ export function Thread() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
 
   const stream = useStreamContext();
+  const { pendingElicitation, clearElicitation } = useElicitation();
   const { threads } = useThreads();
   const { permissions } = useAuth();
   const hasToolView = permissions.includes("tool_view");
@@ -570,6 +573,19 @@ export function Thread() {
                     {isLoading && !firstTokenReceived && (
                       <AssistantMessageLoading />
                     )}
+                    {pendingElicitation && (() => {
+                      let spines: PromoSpine[] = [];
+                      try { spines = JSON.parse(pendingElicitation.spines_json ?? "[]"); } catch { /* empty */ }
+                      return spines.length > 0 ? (
+                        <div className="mx-auto w-full max-w-3xl py-2">
+                          <SpinePickerView
+                            elicitationId={pendingElicitation.elicitation_id}
+                            spines={spines}
+                            onDone={clearElicitation}
+                          />
+                        </div>
+                      ) : null;
+                    })()}
                   </>
                 }
                 footer={
