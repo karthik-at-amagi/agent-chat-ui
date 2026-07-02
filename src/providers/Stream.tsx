@@ -158,6 +158,9 @@ const StreamSession = ({
       ...(apiId ? { "x-login-id": apiId } : {}),
       ...(accountId ? { "x-account-id": accountId } : {}),
     },
+    // Surface events from subagents (e.g. the transition subagent invoked by
+    // finalize_promo) so their tool activity is visible in the run stream.
+    streamSubgraphs: true,
     onCustomEvent: (event, options) => {
       if (isUIMessage(event) || isRemoveUIMessage(event)) {
         options.mutate((prev: StateType) => {
