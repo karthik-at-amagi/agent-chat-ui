@@ -1,11 +1,10 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
   ChevronUp,
   PlusCircle,
-  Download,
   MoveHorizontal,
   X,
 } from "lucide-react";
@@ -29,7 +28,7 @@ export function ToolCalls({
   if (!toolCalls || toolCalls.length === 0) return null;
 
   return (
-    <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
+    <div className="grid w-full max-w-3xl grid-rows-[1fr_auto] gap-2 text-left">
       {toolCalls.map((tc, idx) => {
         const args = tc.args as Record<string, any>;
         const hasArgs = Object.keys(args).length > 0;
@@ -79,6 +78,42 @@ export function ToolCalls({
   );
 }
 
+function normalizeVideoClip(data: any): any | null {
+  const clipStart =
+    typeof data?.clip_start === "number"
+      ? data.clip_start
+      : data?.start_pts_time_s;
+  const clipEnd =
+    typeof data?.clip_end === "number" ? data.clip_end : data?.end_pts_time_s;
+
+  if (
+    data &&
+    typeof data === "object" &&
+    typeof data.asset_id === "string" &&
+    typeof clipStart === "number" &&
+    typeof clipEnd === "number" &&
+    clipEnd > clipStart
+  ) {
+    return {
+      ...data,
+      clip_start: clipStart,
+      clip_end: clipEnd,
+      duration:
+        typeof data.duration === "number"
+          ? data.duration
+          : typeof data.duration_s === "number"
+            ? data.duration_s
+            : clipEnd - clipStart,
+      name: data.name || data.clip_title || data.clip_id || "Video Clip",
+      thumbnail_url:
+        data.thumbnail_url ||
+        (Array.isArray(data.keyframe_urls) ? data.keyframe_urls[0] : undefined),
+    };
+  }
+
+  return null;
+}
+
 function findVideoClips(data: any): any[] {
   const clips: any[] = [];
 
@@ -91,16 +126,9 @@ function findVideoClips(data: any): any[] {
       clips.push(...findVideoClips(item));
     });
   } else {
-    if (
-      "asset_id" in data &&
-      "clip_start" in data &&
-      "clip_end" in data &&
-      typeof data.asset_id === "string" &&
-      typeof data.clip_start === "number" &&
-      typeof data.clip_end === "number" &&
-      data.clip_end > data.clip_start
-    ) {
-      clips.push(data);
+    const normalized = normalizeVideoClip(data);
+    if (normalized) {
+      clips.push(normalized);
     }
     Object.values(data).forEach((value) => {
       clips.push(...findVideoClips(value));
@@ -110,32 +138,16 @@ function findVideoClips(data: any): any[] {
   return clips;
 }
 
-function findAllVideoUrls(data: any): string[] {
-  const urls: string[] = [];
-
-  if (!data || typeof data !== "object") {
-    return urls;
-  }
-
-  if (Array.isArray(data)) {
-    data.forEach((item) => {
-      urls.push(...findAllVideoUrls(item));
-    });
-  } else {
-    if ("video_url" in data && typeof data.video_url === "string") {
-      urls.push(data.video_url);
-    }
-    Object.values(data).forEach((value) => {
-      urls.push(...findAllVideoUrls(value));
-    });
-  }
-
-  return urls;
+function getFinalPromoClips(data: any): any[] {
+  const clips =
+    data?.artifact?.promo_json?.clips || data?.promo_json?.clips || data?.clips;
+  if (!Array.isArray(clips)) return [];
+  return clips.map(normalizeVideoClip).filter(Boolean);
 }
 
-const MAX_CHAR_LENGTH = 50;
-const MAX_LINES = 2;
-const MAX_JSON_ITEMS = 0;
+const MAX_CHAR_LENGTH = 800;
+const MAX_LINES = 12;
+const MAX_JSON_ITEMS = 4;
 const CLIP_FEEDBACK_WHITELISTED_TOOLS = ["show_clips"];
 
 function clamp(value: number, min: number, max: number): number {
@@ -165,7 +177,150 @@ function formatTime(seconds: number): string {
     .padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+function ClipRangeVideo({
+  url,
+  start,
+  end,
+  className,
+  controls = false,
+  autoPlay = false,
+  muted = false,
+}: {
+  url: string;
+  start: number;
+  end: number;
+  className?: string;
+  controls?: boolean;
+  autoPlay?: boolean;
+  muted?: boolean;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const seekAndMaybePlay = () => {
+      if (Number.isFinite(start)) {
+        video.currentTime = Math.max(0, start);
+      }
+      if (autoPlay) {
+        video.play().catch(() => {
+          // Browser may block autoplay with audio; user can press play.
+        });
+      }
+    };
+
+    if (video.readyState >= 1) {
+      seekAndMaybePlay();
+    } else {
+      video.addEventListener("loadedmetadata", seekAndMaybePlay, { once: true });
+    }
+
+    return () => {
+      video.removeEventListener("loadedmetadata", seekAndMaybePlay);
+    };
+  }, [url, start, autoPlay]);
+
+  return (
+    <video
+      ref={videoRef}
+      controls={controls}
+      muted={muted}
+      preload="metadata"
+      className={className}
+      src={removeMediaFragment(url)}
+      onTimeUpdate={(event) => {
+        const video = event.currentTarget;
+        if (Number.isFinite(end) && video.currentTime >= end) {
+          video.pause();
+          video.currentTime = end;
+        }
+      }}
+    />
+  );
+}
+
+function stringifyToolValue(value: any): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseMaybeJsonText(text: string): {
+  parsedContent: any;
+  isJsonContent: boolean;
+} {
+  try {
+    const parsedContent = JSON.parse(text);
+    return {
+      parsedContent,
+      isJsonContent: isComplexValue(parsedContent),
+    };
+  } catch {
+    return { parsedContent: text, isJsonContent: false };
+  }
+}
+
+function parseToolContent(message: ToolMessage): {
+  parsedContent: any;
+  isJsonContent: boolean;
+} {
+  if (typeof message.content === "string") {
+    return parseMaybeJsonText(message.content);
+  }
+
+  if (Array.isArray(message.content)) {
+    const textBlocks = message.content
+      .map((block: any) => block?.text)
+      .filter((text: any) => typeof text === "string");
+
+    if (textBlocks.length === 1) {
+      return parseMaybeJsonText(textBlocks[0]);
+    }
+
+    if (textBlocks.length > 1) {
+      return parseMaybeJsonText(textBlocks.join("\n\n"));
+    }
+  }
+
+  return {
+    parsedContent: message.content,
+    isJsonContent: isComplexValue(message.content),
+  };
+}
+
+function toolArtifactMessage(message: ToolMessage): string {
+  const { parsedContent } = parseToolContent(message);
+  const resultData = message.artifact ?? parsedContent;
+  const messageText =
+    resultData?.message ||
+    resultData?.artifact?.message ||
+    parsedContent?.artifact?.message ||
+    parsedContent?.message;
+
+  return stringifyToolValue(messageText || message.name || "Tool completed");
+}
+
+export function CompactToolResult({ message }: { message: ToolMessage }) {
+  return (
+    <div className="w-full max-w-3xl py-1 text-left">
+      <div className="text-muted-foreground flex items-center justify-start gap-2 text-left text-sm">
+        <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+        <span>{toolArtifactMessage(message)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function ToolResult({ message }: { message: ToolMessage }) {
+  const { parsedContent, isJsonContent } = parseToolContent(message);
+  const resultData = message.artifact ?? parsedContent;
+
   const { apiId } = useAuth();
   const [isExpanded, setIsExpanded] = useState(false);
   const { addToMediaPool, assets } = useVideoEditor();
@@ -184,22 +339,9 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     maxEnd: number | null;
   } | null>(null);
 
-  let parsedContent: any;
-  let isJsonContent = false;
-
-  try {
-    if (typeof message.content === "string") {
-      parsedContent = JSON.parse(message.content);
-      isJsonContent = isComplexValue(parsedContent);
-    }
-  } catch {
-    // Content is not JSON, use as is
-    parsedContent = message.content;
-  }
-
   const contentStr = isJsonContent
-    ? JSON.stringify(parsedContent, null, 2)
-    : String(message.content);
+    ? stringifyToolValue(parsedContent)
+    : stringifyToolValue(message.content);
   const contentLines = contentStr.split("\n");
   const shouldTruncate =
     contentLines.length > MAX_LINES || contentStr.length > MAX_CHAR_LENGTH;
@@ -210,40 +352,44 @@ export function ToolResult({ message }: { message: ToolMessage }) {
         : contentLines.slice(0, MAX_LINES).join("\n") + "\n..."
       : contentStr;
 
-  const videoClips = findVideoClips(message.artifact);
-  const videoUrlsFromContent = isJsonContent
-    ? findAllVideoUrls(parsedContent)
-    : [];
-
+  const videoClips = findVideoClips(resultData);
+  const finalPromoClips = getFinalPromoClips(resultData);
   const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
   const cleanBackendUrl = backendUrl?.endsWith("/")
     ? backendUrl.slice(0, -1)
     : backendUrl;
 
   const resolvedVideoClips = videoClips.map((clip) => {
-    const videoUrlWithoutFragment =
-      typeof clip.video_url === "string"
-        ? removeMediaFragment(clip.video_url).split("?")[0]
-        : "";
-    const extension = videoUrlWithoutFragment.split(".").pop() || "mp4";
-    const fullAssetUrl = cleanBackendUrl
-      ? `${cleanBackendUrl}/asset_files/${clip.asset_id}.${extension}`
-      : clip.video_url;
-
-    let displayUrl = clip.video_url;
-    if (displayUrl && !displayUrl.startsWith("http") && cleanBackendUrl) {
-      const cleanPath = displayUrl.startsWith("/")
-        ? displayUrl.slice(1)
-        : displayUrl;
-      displayUrl = `${cleanBackendUrl}/${cleanPath}`;
+    let fullAssetUrl = clip.video_url;
+    if (fullAssetUrl && !fullAssetUrl.startsWith("http") && cleanBackendUrl) {
+      const cleanPath = fullAssetUrl.startsWith("/")
+        ? fullAssetUrl.slice(1)
+        : fullAssetUrl;
+      fullAssetUrl = `${cleanBackendUrl}/${cleanPath}`;
     }
+    if (!fullAssetUrl && cleanBackendUrl) {
+      fullAssetUrl = `${cleanBackendUrl}/asset_files/${clip.asset_id}.mp4`;
+    }
+    const displayUrl = fullAssetUrl
+      ? buildMediaFragmentUrl(fullAssetUrl, clip.clip_start, clip.clip_end)
+      : undefined;
 
     return {
       ...clip,
       displayUrl,
       fullAssetUrl,
+      thumbnailUrl: clip.thumbnail_url,
     };
   });
+
+  const finalPromoClipKeys = new Set(
+    finalPromoClips.map(
+      (clip) => `${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`,
+    ),
+  );
+  const resolvedFinalPromoClips = resolvedVideoClips.filter((clip) =>
+    finalPromoClipKeys.has(`${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`),
+  );
 
   const canShowClipFeedback = CLIP_FEEDBACK_WHITELISTED_TOOLS.includes(
     message.name || "",
@@ -255,19 +401,6 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       .filter((clip) => clip.asset_id && clip.clip_id)
       .map((clip) => `${clip.asset_id}:${clip.clip_id}`);
   }, [canShowClipFeedback, videoClips]);
-
-  // Also handle cases where we just have URLs but no clip metadata
-  const videoUrls = Array.from(new Set(findAllVideoUrls(message.artifact)));
-  const knownUrls = new Set(videoClips.map((c) => c.video_url).filter(Boolean));
-  const otherUrls = videoUrls.filter((url) => !knownUrls.has(url));
-  const allUrls = [...videoUrlsFromContent, ...otherUrls];
-
-  const resolvedOtherUrls = allUrls.map((url) => {
-    if (!cleanBackendUrl) return url;
-    if (url.startsWith("http")) return url;
-    const cleanPath = url.startsWith("/") ? url.slice(1) : url;
-    return `${cleanBackendUrl}/${cleanPath}`;
-  });
 
   const jsonItems = isJsonContent
     ? Array.isArray(parsedContent)
@@ -419,36 +552,6 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     toast.success("Feedback submitted");
   };
 
-  const handleDownloadClip = async (
-    displayUrl: string | undefined,
-    assetId: string,
-  ) => {
-    try {
-      if (!displayUrl) {
-        throw new Error("Missing clip URL");
-      }
-      const response = await fetch(displayUrl, {
-        headers: {
-          ...(apiId && { "x-login-id": apiId }),
-        },
-      });
-      if (!response.ok) throw new Error("Failed to download video");
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = `clip-${assetId}.mp4`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 100);
-      toast.success("Download started");
-    } catch (e) {
-      console.error(e);
-      toast.error("Failed to download video");
-    }
-  };
-
   const openExpandedClip = (clip: any) => {
     const maxEnd =
       typeof clip.duration === "number" && clip.duration > 0
@@ -495,14 +598,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
 
   const expandedPreviewUrl = useMemo(() => {
     if (!expandedClipState) return null;
-    const baseUrl =
-      expandedClipState.clip.fullAssetUrl || expandedClipState.clip.displayUrl;
-    if (!baseUrl) return null;
-    return buildMediaFragmentUrl(
-      baseUrl,
-      expandedClipState.start,
-      expandedClipState.end,
-    );
+    return expandedClipState.clip.fullAssetUrl || expandedClipState.clip.displayUrl || null;
   }, [expandedClipState]);
 
   useEffect(() => {
@@ -517,7 +613,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
   }, [expandedClipState]);
 
   return (
-    <div className="mx-auto grid max-w-3xl grid-rows-[1fr_auto] gap-2">
+    <div className="grid w-full max-w-3xl grid-rows-[1fr_auto] gap-2 text-left">
       <div className="border-border overflow-hidden rounded-lg border">
         <div className="border-border bg-muted border-b px-4 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -545,8 +641,59 @@ export function ToolResult({ message }: { message: ToolMessage }) {
           transition={{ duration: 0.3 }}
         >
           <div className="p-3">
-            {(resolvedVideoClips.length > 0 ||
-              resolvedOtherUrls.length > 0) && (
+            {resolvedFinalPromoClips.length > 0 && (
+              <div className="mb-4 rounded-lg border bg-background p-3">
+                <div className="mb-3 text-sm font-semibold">Promo simulation</div>
+                <div className="flex gap-3 overflow-x-auto pb-1">
+                  {resolvedFinalPromoClips.map((clip, idx) => (
+                    <div
+                      key={`promo-sim-${idx}`}
+                      className="flex shrink-0 items-center gap-3"
+                    >
+                      <button
+                        type="button"
+                        className="group w-40 overflow-hidden rounded-lg border bg-black text-left"
+                        onClick={() => openExpandedClip(clip)}
+                      >
+                        {clip.thumbnailUrl ? (
+                          <img
+                            src={clip.thumbnailUrl}
+                            alt={clip.clip_title || clip.name || "Promo clip"}
+                            className="aspect-video w-full object-cover transition-opacity group-hover:opacity-80"
+                          />
+                        ) : (
+                          <div className="flex aspect-video w-full items-center justify-center text-xs text-white/70">
+                            Play clip
+                          </div>
+                        )}
+                        <div className="bg-background p-2 text-xs">
+                          <div className="truncate font-medium">
+                            {clip.clip_title || clip.name || `Clip ${idx + 1}`}
+                          </div>
+                          <div className="text-muted-foreground font-mono">
+                            {formatTime(clip.clip_start)}–{formatTime(clip.clip_end)}
+                          </div>
+                        </div>
+                      </button>
+                      {clip.outgoing_transition && (
+                        <div className="text-muted-foreground min-w-20 text-center text-xs">
+                          <div className="rounded-full border px-2 py-1 font-medium uppercase">
+                            {clip.outgoing_transition.kind}
+                          </div>
+                          {clip.outgoing_transition.kind === "dissolve" && (
+                            <div className="mt-1 font-mono">
+                              {clip.outgoing_transition.duration_s}s
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {resolvedVideoClips.length > 0 && (
               <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
                 {resolvedVideoClips.map((clip, idx) => (
                   <div
@@ -554,11 +701,26 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                     className="flex flex-col gap-2"
                   >
                     {clip.displayUrl && (
-                      <video
-                        controls
-                        className="aspect-video w-full rounded-lg bg-black object-contain"
-                        src={clip.displayUrl}
-                      />
+                      <button
+                        type="button"
+                        className="overflow-hidden rounded-lg border bg-black"
+                        onClick={() => openExpandedClip(clip)}
+                      >
+                        {clip.thumbnailUrl ? (
+                          <img
+                            src={clip.thumbnailUrl}
+                            alt={clip.clip_title || clip.name || "Video clip"}
+                            className="aspect-video w-full object-cover"
+                          />
+                        ) : (
+                          <video
+                            muted
+                            preload="metadata"
+                            className="aspect-video w-full object-contain"
+                            src={clip.displayUrl}
+                          />
+                        )}
+                      </button>
                     )}
                     <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
                       <Button
@@ -585,20 +747,6 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                         variant="outline"
                         size="sm"
                         className="items-center gap-2 text-xs"
-                        onClick={async () => {
-                          await handleDownloadClip(
-                            clip.displayUrl,
-                            clip.asset_id,
-                          );
-                        }}
-                      >
-                        <Download className="size-3" />
-                        Download
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="items-center gap-2 text-xs sm:col-span-2"
                         onClick={() => openExpandedClip(clip)}
                       >
                         <MoveHorizontal className="size-3" />
@@ -637,18 +785,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                     </div>
                   </div>
                 ))}
-                {resolvedOtherUrls.map((url, idx) => (
-                  <div
-                    key={`url-${idx}`}
-                    className="flex flex-col gap-2"
-                  >
-                    <video
-                      controls
-                      className="aspect-video w-full rounded-lg bg-black object-contain"
-                      src={url}
-                    />
-                  </div>
-                ))}
+
               </div>
             )}
             <AnimatePresence
@@ -727,11 +864,14 @@ export function ToolResult({ message }: { message: ToolMessage }) {
             </div>
             <div className="space-y-4 p-4">
               {expandedPreviewUrl && (
-                <video
-                  key={expandedPreviewUrl}
+                <ClipRangeVideo
+                  key={`${expandedPreviewUrl}:${expandedClipState.start}:${expandedClipState.end}`}
+                  url={expandedPreviewUrl}
+                  start={expandedClipState.start}
+                  end={expandedClipState.end}
                   controls
+                  autoPlay
                   className="aspect-video w-full rounded-lg bg-black object-contain"
-                  src={expandedPreviewUrl}
                 />
               )}
               <div className="grid gap-3 sm:grid-cols-2">
@@ -811,20 +951,6 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                 >
                   <PlusCircle className="size-3" />
                   Send to pool
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 items-center gap-2"
-                  onClick={async () => {
-                    await handleDownloadClip(
-                      expandedClipState.clip.displayUrl,
-                      expandedClipState.clip.asset_id,
-                    );
-                  }}
-                >
-                  <Download className="size-3" />
-                  Download
                 </Button>
               </div>
             </div>

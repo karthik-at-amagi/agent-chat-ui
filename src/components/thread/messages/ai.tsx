@@ -6,7 +6,7 @@ import { BranchSwitcher, CommandBar } from "./shared";
 import { MarkdownText } from "../markdown-text";
 import { LoadExternalComponent } from "@langchain/langgraph-sdk/react-ui";
 import { cn } from "@/lib/utils";
-import { ToolCalls, ToolResult } from "./tool-calls";
+import { CompactToolResult, ToolCalls, ToolResult } from "./tool-calls";
 import { MessageContentComplex } from "@langchain/core/messages";
 import { Fragment } from "react/jsx-runtime";
 import { isAgentInboxInterruptSchema } from "@/lib/agent-inbox-interrupt";
@@ -160,13 +160,11 @@ export function AssistantMessage({
   const hasVisibleInterrupt =
     !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
 
-  const WHITELISTED_TOOLS = ["show_clips"];
-  const isWhitelistedToolResult =
-    message?.type === "tool" && WHITELISTED_TOOLS.includes(message.name || "");
-
-  if (isToolResult && effectiveHideToolCalls && !isWhitelistedToolResult) {
-    return null;
-  }
+  const RICH_TOOL_RESULT_TOOLS = ["show_clips", "finalize_promo", "submit_final_promo"];
+  const isRichToolResult =
+    message?.type === "tool" && RICH_TOOL_RESULT_TOOLS.includes(message.name || "");
+  const showCompactToolResult =
+    message?.type === "tool" && effectiveHideToolCalls && !isRichToolResult;
 
   if (
     !isToolResult &&
@@ -183,7 +181,11 @@ export function AssistantMessage({
       <div className="flex w-full flex-col gap-2">
         {isToolResult ? (
           <>
-            <ToolResult message={message} />
+            {showCompactToolResult ? (
+              <CompactToolResult message={message} />
+            ) : (
+              <ToolResult message={message} />
+            )}
             <Interrupt
               interrupt={threadInterrupt}
               isLastMessage={isLastMessage}

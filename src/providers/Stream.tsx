@@ -147,7 +147,9 @@ const StreamSession = ({
   const [pendingElicitation, setPendingElicitation] =
     useState<MCPElicitationEvent | null>(null);
   const clearElicitation = () => setPendingElicitation(null);
-  const streamValue = useTypedStream({
+  const streamOptions: UseStreamOptions<StateType, StreamBag> & {
+    streamSubgraphs?: boolean;
+  } = {
     apiUrl,
     apiKey: apiKey ?? undefined,
     assistantId,
@@ -177,7 +179,8 @@ const StreamSession = ({
       // Refetch threads list when thread ID changes.
       getThreads().then(setThreads).catch(console.error);
     },
-  });
+  };
+  const streamValue = useTypedStream(streamOptions);
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey, apiId).then((ok) => {
