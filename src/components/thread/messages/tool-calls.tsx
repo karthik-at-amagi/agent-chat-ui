@@ -114,7 +114,7 @@ function normalizeVideoClip(data: any): any | null {
   return null;
 }
 
-function findVideoClips(data: any): any[] {
+export function findVideoClips(data: any): any[] {
   const clips: any[] = [];
 
   if (!data || typeof data !== "object") {

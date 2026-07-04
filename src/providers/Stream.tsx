@@ -185,10 +185,10 @@ const StreamSession = ({
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey, apiId).then((ok) => {
       if (!ok) {
-        toast.error("Failed to connect to backend", {
+        toast.error("Failed to connect to Agent API", {
           description: () => (
             <p>
-              Please ensure your backend is running at <code>{apiUrl}</code>.
+              Please ensure your Agent API is running at <code>{apiUrl}</code>.
             </p>
           ),
           duration: 10000,

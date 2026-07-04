@@ -229,9 +229,15 @@ export function Thread() {
 
   const stream = useStreamContext();
   const { pendingElicitation, clearElicitation } = useElicitation();
-  const { threads } = useThreads();
+  const { threads, getThreads } = useThreads();
   const { permissions } = useAuth();
   const hasToolView = permissions.includes("tool_view");
+
+  useEffect(() => {
+    if (pendingElicitation === null) {
+      void getThreads();
+    }
+  }, [pendingElicitation, getThreads]);
 
   const threadSummary = threads.find((t) => t.thread_id === threadId);
   const historyMessages =
