@@ -214,7 +214,9 @@ function ClipRangeVideo({
     if (video.readyState >= 1) {
       seekAndMaybePlay();
     } else {
-      video.addEventListener("loadedmetadata", seekAndMaybePlay, { once: true });
+      video.addEventListener("loadedmetadata", seekAndMaybePlay, {
+        once: true,
+      });
     }
 
     return () => {
@@ -388,7 +390,9 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     ),
   );
   const resolvedFinalPromoClips = resolvedVideoClips.filter((clip) =>
-    finalPromoClipKeys.has(`${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`),
+    finalPromoClipKeys.has(
+      `${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`,
+    ),
   );
 
   const canShowClipFeedback = CLIP_FEEDBACK_WHITELISTED_TOOLS.includes(
@@ -598,7 +602,11 @@ export function ToolResult({ message }: { message: ToolMessage }) {
 
   const expandedPreviewUrl = useMemo(() => {
     if (!expandedClipState) return null;
-    return expandedClipState.clip.fullAssetUrl || expandedClipState.clip.displayUrl || null;
+    return (
+      expandedClipState.clip.fullAssetUrl ||
+      expandedClipState.clip.displayUrl ||
+      null
+    );
   }, [expandedClipState]);
 
   useEffect(() => {
@@ -642,8 +650,10 @@ export function ToolResult({ message }: { message: ToolMessage }) {
         >
           <div className="p-3">
             {resolvedFinalPromoClips.length > 0 && (
-              <div className="mb-4 rounded-lg border bg-background p-3">
-                <div className="mb-3 text-sm font-semibold">Promo simulation</div>
+              <div className="bg-background mb-4 rounded-lg border p-3">
+                <div className="mb-3 text-sm font-semibold">
+                  Promo simulation
+                </div>
                 <div className="flex gap-3 overflow-x-auto pb-1">
                   {resolvedFinalPromoClips.map((clip, idx) => (
                     <div
@@ -671,7 +681,8 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                             {clip.clip_title || clip.name || `Clip ${idx + 1}`}
                           </div>
                           <div className="text-muted-foreground font-mono">
-                            {formatTime(clip.clip_start)}–{formatTime(clip.clip_end)}
+                            {formatTime(clip.clip_start)}–
+                            {formatTime(clip.clip_end)}
                           </div>
                         </div>
                       </button>
@@ -785,7 +796,6 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                     </div>
                   </div>
                 ))}
-
               </div>
             )}
             <AnimatePresence

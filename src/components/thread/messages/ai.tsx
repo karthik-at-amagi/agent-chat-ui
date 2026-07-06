@@ -160,9 +160,14 @@ export function AssistantMessage({
   const hasVisibleInterrupt =
     !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
 
-  const RICH_TOOL_RESULT_TOOLS = ["show_clips", "finalize_promo", "submit_final_promo"];
+  const RICH_TOOL_RESULT_TOOLS = [
+    "show_clips",
+    "finalize_promo",
+    "submit_final_promo",
+  ];
   const isRichToolResult =
-    message?.type === "tool" && RICH_TOOL_RESULT_TOOLS.includes(message.name || "");
+    message?.type === "tool" &&
+    RICH_TOOL_RESULT_TOOLS.includes(message.name || "");
   const showCompactToolResult =
     message?.type === "tool" && effectiveHideToolCalls && !isRichToolResult;
 

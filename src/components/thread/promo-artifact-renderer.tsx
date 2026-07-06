@@ -55,8 +55,11 @@ export function PromoArtifactRenderer({ message }: PromoArtifactRendererProps) {
         const assetUrl = resolvedUrls[assetId];
 
         return (
-          <div key={assetId} className="flex flex-col gap-2">
-            <div className="relative group">
+          <div
+            key={assetId}
+            className="flex flex-col gap-2"
+          >
+            <div className="group relative">
               <div className="aspect-video w-32 overflow-hidden rounded-md border bg-black">
                 {clip.keyframe_urls && clip.keyframe_urls.length > 0 ? (
                   <img
@@ -73,7 +76,7 @@ export function PromoArtifactRenderer({ message }: PromoArtifactRendererProps) {
                     }}
                   />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-muted text-[10px] text-muted-foreground">
+                  <div className="bg-muted text-muted-foreground flex h-full w-full items-center justify-center text-[10px]">
                     {isResolving ? "Loading..." : "No Preview"}
                   </div>
                 )}
@@ -86,7 +89,7 @@ export function PromoArtifactRenderer({ message }: PromoArtifactRendererProps) {
                 </button>
               </div>
             </div>
-            <div className="text-[10px] text-muted-foreground truncate max-w-[128px]">
+            <div className="text-muted-foreground max-w-[128px] truncate text-[10px]">
               {clip.asset_id}
             </div>
           </div>

@@ -14,9 +14,13 @@ interface SpinePickerProps {
   onDone: () => void;
 }
 
-export function SpinePickerView({ elicitationId, spines: initialSpines, onDone }: SpinePickerProps) {
+export function SpinePickerView({
+  elicitationId,
+  spines: initialSpines,
+  onDone,
+}: SpinePickerProps) {
   const [localSpines, setLocalSpines] = useState<PromoSpine[]>(
-    initialSpines.map((s) => (typeof s === "string" ? JSON.parse(s) : s))
+    initialSpines.map((s) => (typeof s === "string" ? JSON.parse(s) : s)),
   );
   const [selected, setSelected] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -54,9 +58,9 @@ export function SpinePickerView({ elicitationId, spines: initialSpines, onDone }
       const base = apiUrl.endsWith("/") ? apiUrl.slice(0, -1) : apiUrl;
       const payload: any = {
         action: "accept",
-        content: { 
+        content: {
           selected_option: selected + 1,
-          updated_spines: localSpines.map((s) => JSON.stringify(s))
+          updated_spines: localSpines.map((s) => JSON.stringify(s)),
         },
       };
 
@@ -90,7 +94,10 @@ export function SpinePickerView({ elicitationId, spines: initialSpines, onDone }
         {localSpines.map((spine, i) => {
           if (editingIndex === i) {
             return (
-              <div key={i} className="border-primary flex w-full flex-col gap-2 rounded-lg border p-4">
+              <div
+                key={i}
+                className="border-primary flex w-full flex-col gap-2 rounded-lg border p-4"
+              >
                 <Input
                   placeholder="Label"
                   value={spine.label}
@@ -119,10 +126,17 @@ export function SpinePickerView({ elicitationId, spines: initialSpines, onDone }
                   }}
                 />
                 <div className="flex justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={handleCancelEdit}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleCancelEdit}
+                  >
                     <X className="size-4" />
                   </Button>
-                  <Button size="sm" onClick={() => handleSaveEdit(i)}>
+                  <Button
+                    size="sm"
+                    onClick={() => handleSaveEdit(i)}
+                  >
                     <Check className="size-4" />
                   </Button>
                 </div>
@@ -143,14 +157,16 @@ export function SpinePickerView({ elicitationId, spines: initialSpines, onDone }
                 }
               }}
               className={cn(
-                "group border-border flex w-full flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors cursor-pointer",
+                "group border-border flex w-full cursor-pointer flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors",
                 selected === i
                   ? "border-primary bg-primary/5"
                   : "bg-muted/50 hover:bg-muted",
               )}
             >
               <div className="flex w-full items-center justify-between gap-2">
-                <span className="text-foreground text-sm font-medium">{spine.label}</span>
+                <span className="text-foreground text-sm font-medium">
+                  {spine.label}
+                </span>
                 <div className="flex items-center gap-2">
                   <span className="text-muted-foreground bg-muted rounded-full px-2 py-0.5 text-xs">
                     {spine.type}
@@ -180,8 +196,13 @@ export function SpinePickerView({ elicitationId, spines: initialSpines, onDone }
       </div>
 
       <div className="flex w-full flex-col gap-2 px-4 pb-4">
-        <Button variant="outline" size="sm" onClick={handleAddSpine} className="w-full">
-          <Plus className="size-4 mr-2" /> Add New Spine
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleAddSpine}
+          className="w-full"
+        >
+          <Plus className="mr-2 size-4" /> Add New Spine
         </Button>
       </div>
 

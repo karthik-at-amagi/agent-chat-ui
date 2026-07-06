@@ -169,7 +169,9 @@ const StreamSession = ({
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
-      } else if ((event as MCPElicitationEvent).type === "mcp_elicitation_request") {
+      } else if (
+        (event as MCPElicitationEvent).type === "mcp_elicitation_request"
+      ) {
         setPendingElicitation(event as MCPElicitationEvent);
       }
     },
@@ -200,7 +202,9 @@ const StreamSession = ({
   }, [apiKey, apiUrl, apiId]);
 
   return (
-    <ElicitationContext.Provider value={{ pendingElicitation, clearElicitation }}>
+    <ElicitationContext.Provider
+      value={{ pendingElicitation, clearElicitation }}
+    >
       <StreamContext.Provider value={streamValue}>
         {children}
       </StreamContext.Provider>
