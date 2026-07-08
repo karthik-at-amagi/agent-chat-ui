@@ -20,7 +20,12 @@ interface AuthContextType {
   displayName: string | null;
   permissions: string[];
   accountId: string | null;
-  setApiId: (id: string, displayName?: string, permissions?: string[], accountId?: string) => void;
+  setApiId: (
+    id: string,
+    displayName?: string,
+    permissions?: string[],
+    accountId?: string,
+  ) => void;
   logout: () => void;
 }
 
@@ -65,7 +70,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({
     setIsLoaded(true);
   }, []);
 
-  const setApiId = (id: string, name?: string, perms?: string[], acctId?: string) => {
+  const setApiId = (
+    id: string,
+    name?: string,
+    perms?: string[],
+    acctId?: string,
+  ) => {
     saveApiId(id);
     if (name) {
       window.localStorage.setItem("lg:chat:displayName", name);

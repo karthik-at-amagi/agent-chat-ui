@@ -229,9 +229,15 @@ export function Thread() {
 
   const stream = useStreamContext();
   const { pendingElicitation, clearElicitation } = useElicitation();
-  const { threads } = useThreads();
+  const { threads, getThreads } = useThreads();
   const { permissions } = useAuth();
   const hasToolView = permissions.includes("tool_view");
+
+  useEffect(() => {
+    if (pendingElicitation === null) {
+      void getThreads();
+    }
+  }, [pendingElicitation, getThreads]);
 
   const threadSummary = threads.find((t) => t.thread_id === threadId);
   const historyMessages =
@@ -573,19 +579,26 @@ export function Thread() {
                     {isLoading && !firstTokenReceived && (
                       <AssistantMessageLoading />
                     )}
-                    {pendingElicitation && (() => {
-                      let spines: PromoSpine[] = [];
-                      try { spines = JSON.parse(pendingElicitation.spines_json ?? "[]"); } catch { /* empty */ }
-                      return spines.length > 0 ? (
-                        <div className="mx-auto w-full max-w-3xl py-2">
-                          <SpinePickerView
-                            elicitationId={pendingElicitation.elicitation_id}
-                            spines={spines}
-                            onDone={clearElicitation}
-                          />
-                        </div>
-                      ) : null;
-                    })()}
+                    {pendingElicitation &&
+                      (() => {
+                        let spines: PromoSpine[] = [];
+                        try {
+                          spines = JSON.parse(
+                            pendingElicitation.spines_json ?? "[]",
+                          );
+                        } catch {
+                          /* empty */
+                        }
+                        return spines.length > 0 ? (
+                          <div className="mx-auto w-full max-w-3xl py-2">
+                            <SpinePickerView
+                              elicitationId={pendingElicitation.elicitation_id}
+                              spines={spines}
+                              onDone={clearElicitation}
+                            />
+                          </div>
+                        ) : null;
+                      })()}
                   </>
                 }
                 footer={

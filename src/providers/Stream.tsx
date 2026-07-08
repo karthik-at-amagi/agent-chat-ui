@@ -169,7 +169,9 @@ const StreamSession = ({
           const ui = uiMessageReducer(prev.ui ?? [], event);
           return { ...prev, ui };
         });
-      } else if ((event as MCPElicitationEvent).type === "mcp_elicitation_request") {
+      } else if (
+        (event as MCPElicitationEvent).type === "mcp_elicitation_request"
+      ) {
         setPendingElicitation(event as MCPElicitationEvent);
       }
     },
@@ -185,10 +187,10 @@ const StreamSession = ({
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey, apiId).then((ok) => {
       if (!ok) {
-        toast.error("Failed to connect to backend", {
+        toast.error("Failed to connect to Agent API", {
           description: () => (
             <p>
-              Please ensure your backend is running at <code>{apiUrl}</code>.
+              Please ensure your Agent API is running at <code>{apiUrl}</code>.
             </p>
           ),
           duration: 10000,
@@ -200,7 +202,9 @@ const StreamSession = ({
   }, [apiKey, apiUrl, apiId]);
 
   return (
-    <ElicitationContext.Provider value={{ pendingElicitation, clearElicitation }}>
+    <ElicitationContext.Provider
+      value={{ pendingElicitation, clearElicitation }}
+    >
       <StreamContext.Provider value={streamValue}>
         {children}
       </StreamContext.Provider>
