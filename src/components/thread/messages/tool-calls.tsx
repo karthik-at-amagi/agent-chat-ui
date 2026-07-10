@@ -584,6 +584,21 @@ function SplitEditDiagram({
   );
 }
 
+function productVisibleUiEvents(events: any[], hasFinalPromo = false): any[] {
+  return events.filter((event) => {
+    if (event.kind === "clip_selection_review" && event.status === "needs_revision") {
+      return false;
+    }
+    if (
+      hasFinalPromo &&
+      (event.kind === "editor_decisions" || event.kind === "clip_selection_review")
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 function UiEventCards({
   events,
   onClipPreview,
@@ -591,10 +606,11 @@ function UiEventCards({
   events: any[];
   onClipPreview?: (clip: any) => void;
 }) {
-  if (!events.length) return null;
+  const visibleEvents = productVisibleUiEvents(events);
+  if (!visibleEvents.length) return null;
   return (
     <div className="mb-4 flex flex-col gap-3">
-      {events.map((event, idx) => {
+      {visibleEvents.map((event, idx) => {
         if (event.kind === "spine_selection") {
           const payload = event.payload || {};
           const options = payload.options || [];
@@ -1099,8 +1115,12 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       .map((clip) => `${clip.asset_id}:${clip.clip_id}`);
   }, [canShowClipFeedback, videoClips]);
 
+  const visibleUiEvents = productVisibleUiEvents(
+    uiEvents,
+    resolvedFinalPromoClips.length > 0,
+  );
   const hasProductUi =
-    uiEvents.length > 0 ||
+    visibleUiEvents.length > 0 ||
     resolvedFinalPromoClips.length > 0 ||
     resolvedVideoClips.length > 0;
 
@@ -1357,15 +1377,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
         >
           <div className="p-3">
             <UiEventCards
-              events={
-                resolvedFinalPromoClips.length > 0
-                  ? uiEvents.filter(
-                      (event) =>
-                        event.kind !== "editor_decisions" &&
-                        event.kind !== "clip_selection_review",
-                    )
-                  : uiEvents
-              }
+              events={visibleUiEvents}
               onClipPreview={(clip) =>
                 setExpandedClipState({
                   clip: {
