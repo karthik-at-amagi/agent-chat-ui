@@ -77,10 +77,12 @@ function PromoRenderPlayer({
   clips,
   apiId,
   onRenderDone,
+  cacheKey,
 }: {
   clips: PromoClip[];
   apiId: string | null;
   onRenderDone: (url: string) => void;
+  cacheKey: string | null;
 }) {
   const [status, setStatus] = useState<RenderStatus>("idle");
   const [progress, setProgress] = useState(0);
@@ -99,6 +101,7 @@ function PromoRenderPlayer({
     const backendUrl = cleanBackendUrl;
 
     const body: Record<string, any> = {
+      ...(cacheKey ? { cache_key: cacheKey } : {}),
       clips: clips.map((c, idx) => {
         const trans = c.outgoing_transition;
         const outgoing_transition = trans
@@ -955,6 +958,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
               <PromoRenderPlayer
                 clips={resolvedFinalPromoClips}
                 apiId={apiId}
+                cacheKey={threadId && message.id ? `${threadId}_${message.id}` : null}
                 onRenderDone={(url) => {
                   console.log("Promo render done:", url);
                 }}
