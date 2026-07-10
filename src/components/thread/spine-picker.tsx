@@ -24,7 +24,9 @@ export function SpinePickerView({
   );
   const [selected, setSelected] = useState<number | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState(false);
+  const [submitted, setSubmitted] = useState<"accept" | "revise" | null>(null);
   const [apiUrl] = useQueryState("apiUrl");
 
   const handleAddSpine = () => {
@@ -71,7 +73,7 @@ export function SpinePickerView({
       });
 
       if (!res.ok) throw new Error(await res.text());
-      onDone();
+      setSubmitted("accept");
     } catch (err: any) {
       toast.error("Failed to submit spine", {
         description: err?.message,
@@ -84,13 +86,47 @@ export function SpinePickerView({
     }
   };
 
-  return (
-    <div className="border-border flex w-full flex-col items-start gap-4 rounded-lg border">
-      <div className="border-border bg-muted w-full border-b px-4 py-2">
-        <h3 className="text-foreground font-medium">Choose a Promo Spine</h3>
-      </div>
+  const handleRequestNewSpines = async () => {
+    if (!apiUrl || !feedback.trim()) {
+      toast.error("Add feedback for the next spine direction", {
+        richColors: true,
+        closeButton: true,
+      });
+      return;
+    }
+    setLoading(true);
+    try {
+      const base = apiUrl.endsWith("/") ? apiUrl.slice(0, -1) : apiUrl;
+      const res = await fetch(`${base}/elicitations/${elicitationId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "accept",
+          content: {
+            accepted: false,
+            feedback: feedback.trim(),
+          },
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setSubmitted("revise");
+    } catch (err: any) {
+      toast.error("Failed to submit spine feedback", {
+        description: err?.message,
+        richColors: true,
+        closeButton: true,
+        duration: 5000,
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      <div className="flex w-full flex-col gap-2 px-4">
+  return (
+    <div className="bg-background flex w-full flex-col items-start gap-3 rounded-lg p-1">
+      <div className="px-1 text-sm font-semibold">Choose a promo spine</div>
+
+      <div className="flex w-full flex-col gap-1">
         {localSpines.map((spine, i) => {
           if (editingIndex === i) {
             return (
@@ -157,10 +193,10 @@ export function SpinePickerView({
                 }
               }}
               className={cn(
-                "group border-border flex w-full cursor-pointer flex-col items-start gap-1 rounded-lg border p-4 text-left transition-colors",
+                "group flex w-full cursor-pointer flex-col items-start gap-1 rounded-r-lg border-l-2 px-3 py-3 text-left transition-colors",
                 selected === i
                   ? "border-primary bg-primary/5"
-                  : "bg-muted/50 hover:bg-muted",
+                  : "border-transparent bg-transparent hover:bg-muted/50",
               )}
             >
               <div className="flex w-full items-center justify-between gap-2">
@@ -195,24 +231,42 @@ export function SpinePickerView({
         })}
       </div>
 
-      <div className="flex w-full flex-col gap-2 px-4 pb-4">
+      <div className="flex w-full flex-col gap-2 px-1">
         <Button
           variant="outline"
           size="sm"
           onClick={handleAddSpine}
+          disabled={submitted !== null}
           className="w-full"
         >
           <Plus className="mr-2 size-4" /> Add New Spine
         </Button>
+        <Textarea
+          placeholder="Want a different direction? Describe what the next spine options should emphasize."
+          value={feedback}
+          disabled={submitted !== null}
+          onChange={(e) => setFeedback(e.target.value)}
+        />
       </div>
 
-      <div className="flex w-full items-center justify-end px-4 pb-4">
+      <div className="flex w-full items-center justify-end gap-2 px-1 pb-1">
+        <Button
+          variant="outline"
+          disabled={loading || submitted !== null}
+          onClick={handleRequestNewSpines}
+        >
+          {submitted === "revise" ? "Feedback sent" : "Suggest different spines"}
+        </Button>
         <Button
           variant="brand"
-          disabled={selected === null || loading}
+          disabled={selected === null || loading || submitted !== null}
           onClick={handleSubmit}
         >
-          {loading ? "Submitting..." : "Use this spine"}
+          {submitted === "accept"
+            ? "Selected"
+            : loading
+              ? "Submitting..."
+              : "Use this spine"}
         </Button>
       </div>
     </div>

@@ -49,7 +49,9 @@ export interface MCPElicitationEvent {
   server_name: string;
   tool_name: string;
   text: string;
+  kind?: "spine" | "clip_selection" | "edit_decisions_review";
   spines_json: string;
+  payload_json?: string;
 }
 
 type StreamBag = {
