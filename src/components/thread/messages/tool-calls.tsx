@@ -20,6 +20,250 @@ function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
 }
 
+// ------------------------------------------------------------------
+// PromoRenderPlayer: async render player with animated storyboard
+// ------------------------------------------------------------------
+
+interface PromoClip {
+  asset_id: string;
+  clip_start: number;
+  clip_end: number;
+  outgoing_transition?: { kind: string; duration_s?: number };
+  thumbnailUrl?: string;
+}
+
+type RenderStatus = "idle" | "rendering" | "done" | "error";
+
+function HlsPlayer({ hlsUrl }: { hlsUrl: string }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !hlsUrl) return;
+
+    let hls: any = null;
+
+    const attach = async () => {
+      const Hls = (await import("hls.js")).default;
+      console.log("[HlsPlayer] hlsUrl:", hlsUrl, "isSupported:", Hls.isSupported());
+      if (Hls.isSupported()) {
+        hls = new Hls({ lowLatencyMode: false });
+        hls.loadSource(hlsUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => { console.log("[HlsPlayer] manifest parsed"); });
+        hls.on(Hls.Events.ERROR, (_: any, data: any) => console.error("[HlsPlayer] hls error:", data.type, data.details, data.fatal));
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        // Safari native HLS
+        video.src = hlsUrl;
+      }
+    };
+
+    attach();
+    return () => { hls?.destroy(); };
+  }, [hlsUrl]);
+
+  return (
+    <video
+      ref={videoRef}
+      controls
+      autoPlay
+      muted
+      className="w-full rounded bg-black"
+    />
+  );
+}
+
+function PromoRenderPlayer({
+  clips,
+  apiId,
+  onRenderDone,
+  cacheKey,
+}: {
+  clips: PromoClip[];
+  apiId: string | null;
+  onRenderDone: (url: string) => void;
+  cacheKey: string | null;
+}) {
+  const [status, setStatus] = useState<RenderStatus>("idle");
+  const [progress, setProgress] = useState(0);
+  const [hlsUrl, setHlsUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const backendUrlRaw = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL") ?? "";
+  const cleanBackendUrl = backendUrlRaw.endsWith("/") ? backendUrlRaw.slice(0, -1) : backendUrlRaw;
+
+  // Trigger render when component mounts (once)
+  useEffect(() => {
+    if (status !== "idle") return;
+    if (clips.length === 0) return;
+    if (!cleanBackendUrl) return;
+
+    setStatus("rendering");
+    const backendUrl = cleanBackendUrl;
+
+    const body: Record<string, any> = {
+      ...(cacheKey ? { cache_key: cacheKey } : {}),
+      clips: clips.map((c, idx) => {
+        const trans = c.outgoing_transition;
+        const outgoing_transition = trans
+          ? { kind: trans.kind, duration_s: trans.duration_s }
+          : (idx < clips.length - 1 ? { kind: "cut", duration_s: 0 } : null);
+        return {
+          asset_id: c.asset_id,
+          clip_start: c.clip_start,
+          clip_end: c.clip_end,
+          outgoing_transition,
+        };
+      }),
+    };
+
+    fetch(`${backendUrl}/render`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiId ? { "x-login-id": apiId } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+      .then((r) => r.json())
+      .then(({ job_id, hls_url }: { job_id: string; hls_url: string }) => {
+        // Show player immediately with the playlist URL (segments stream in as ffmpeg encodes)
+        if (hls_url) setHlsUrl(`${backendUrl}${hls_url}`);
+
+        let consecutiveFailures = 0;
+        const maxRetries = 5;
+        const poll = setInterval(async () => {
+          const res = await fetch(`${backendUrl}/render/status/${job_id}`);
+          if (!res.ok) {
+            consecutiveFailures++;
+            if (consecutiveFailures >= maxRetries) {
+              clearInterval(poll);
+              setStatus("error");
+              setError("Render job not found");
+            }
+            return;
+          }
+          consecutiveFailures = 0;
+          const job = await res.json();
+          setProgress(job.progress);
+          if (job.hls_url && !hlsUrl) setHlsUrl(`${backendUrl}${job.hls_url}`);
+          if (job.status === "done") {
+            clearInterval(poll);
+            setStatus("done");
+            onRenderDone(job.hls_url ?? "");
+          } else if (job.status === "failed") {
+            clearInterval(poll);
+            setStatus("error");
+            setError(job.error ?? "Render failed");
+          }
+        }, 2000);
+        return () => clearInterval(poll);
+      });
+  }, [clips.length, apiId, onRenderDone, cleanBackendUrl]);
+
+  // Idle: nothing
+  if (status === "idle") return null;
+
+  // Error state
+  if (status === "error") {
+    return (
+      <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3">
+        <div className="mb-2 text-sm font-semibold text-red-700">Promo render failed</div>
+        {error && (
+          <div className="mb-2 rounded bg-white/50 p-2 text-xs text-red-600">
+            {error}
+          </div>
+        )}
+        <button
+          className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+          onClick={() => window.location.reload()}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  // Once we have an HLS URL, show the player (works during encoding and after)
+  if (hlsUrl) {
+    return (
+      <div className="mb-4 rounded-lg border p-3">
+        <div className="mb-2 flex items-center justify-between text-sm font-semibold">
+          <span>{status === "done" ? "Promo playback" : `Rendering… ${progress}%`}</span>
+        </div>
+        {status === "rendering" && (
+          <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+            <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+          </div>
+        )}
+        <HlsPlayer hlsUrl={hlsUrl} />
+      </div>
+    );
+  }
+
+  // Rendering state: animated storyboard + progress bar (no HLS URL yet)
+  return (
+    <div className="mb-4 rounded-lg border p-3">
+      <div className="mb-2 text-sm font-semibold">
+        Rendering promo — {clips.length} clips with transitions
+      </div>
+
+      {/* Animated clip strip */}
+      <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+        {clips.map((clip, idx) => (
+          <div
+            key={`promo-render-${idx}`}
+            className="relative flex shrink-0 flex-col items-center gap-1"
+          >
+            <div
+              className={`
+                aspect-video w-28 overflow-hidden rounded border
+                ${status === "rendering"
+                  ? "animate-pulse border-blue-400"
+                  : "border-gray-300"}
+              `}
+            >
+              {clip.thumbnailUrl ? (
+                <img
+                  src={clip.thumbnailUrl}
+                  alt={`Clip ${idx + 1}`}
+                  className="aspect-video w-full object-cover"
+                />
+              ) : (
+                <div className="flex aspect-video w-full items-center justify-center bg-gray-200 text-xs text-gray-500">
+                  Clip {idx + 1}
+                </div>
+              )}
+            </div>
+            <div className="text-center text-xs text-gray-600">
+              <div className="font-medium">Clip {idx + 1}</div>
+              <div className="font-mono">
+                {formatTime(clip.clip_start)}–{formatTime(clip.clip_end)}
+              </div>
+              {clip.outgoing_transition && (
+                <div className="text-[10px] capitalize text-gray-400">
+                  {clip.outgoing_transition.kind}
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Progress bar */}
+      <div className="mb-1 h-2 w-full overflow-hidden rounded bg-gray-200">
+        <div
+          className="h-full rounded bg-blue-500 transition-all duration-300"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <div className="text-xs text-gray-500">
+        {progress < 100 ? `${progress}% complete` : "Render complete"}
+      </div>
+    </div>
+  );
+}
+
+
 export function ToolCalls({
   toolCalls,
 }: {
@@ -82,9 +326,15 @@ function normalizeVideoClip(data: any): any | null {
   const clipStart =
     typeof data?.clip_start === "number"
       ? data.clip_start
-      : data?.start_pts_time_s;
+      : typeof data?.start_time === "number"
+        ? data.start_time
+        : data?.start_pts_time_s;
   const clipEnd =
-    typeof data?.clip_end === "number" ? data.clip_end : data?.end_pts_time_s;
+    typeof data?.clip_end === "number"
+      ? data.clip_end
+      : typeof data?.end_time === "number"
+        ? data.end_time
+        : data?.end_pts_time_s;
 
   if (
     data &&
@@ -364,9 +614,9 @@ export function ToolResult({ message }: { message: ToolMessage }) {
   const resolvedVideoClips = videoClips.map((clip) => {
     let fullAssetUrl = clip.video_url;
     if (fullAssetUrl && !fullAssetUrl.startsWith("http") && cleanBackendUrl) {
-      const cleanPath = fullAssetUrl.startsWith("/")
-        ? fullAssetUrl.slice(1)
-        : fullAssetUrl;
+      // rewrite /assets/<id> → /asset_files/<id>
+      const normalized = fullAssetUrl.replace(/^\/?assets\//, "asset_files/");
+      const cleanPath = normalized.startsWith("/") ? normalized.slice(1) : normalized;
       fullAssetUrl = `${cleanBackendUrl}/${cleanPath}`;
     }
     if (!fullAssetUrl && cleanBackendUrl) {
@@ -702,6 +952,17 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                   ))}
                 </div>
               </div>
+            )}
+
+            {resolvedFinalPromoClips.length > 0 && (
+              <PromoRenderPlayer
+                clips={resolvedFinalPromoClips}
+                apiId={apiId}
+                cacheKey={threadId && message.id ? `${threadId}_${message.id}` : null}
+                onRenderDone={(url) => {
+                  console.log("Promo render done:", url);
+                }}
+              />
             )}
 
             {resolvedVideoClips.length > 0 && (
