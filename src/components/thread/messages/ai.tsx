@@ -159,10 +159,16 @@ export function AssistantMessage({
 
   const hasVisibleInterrupt =
     !!threadInterrupt && (isLastMessage || hasNoAIOrToolMessages);
+  const isInternalStructuredResponse =
+    contentString.startsWith("EditPlan(") ||
+    contentString.includes("transitions=[TransitionDecision(") ||
+    contentString.includes("clips=[ClipEdit(");
 
   const RICH_TOOL_RESULT_TOOLS = [
     "show_clips",
+    "spine",
     "finalize_promo",
+    "review_clip_selection",
     "submit_final_promo",
   ];
   const isRichToolResult =
@@ -174,7 +180,7 @@ export function AssistantMessage({
   if (
     !isToolResult &&
     effectiveHideToolCalls &&
-    contentString.length === 0 &&
+    (contentString.length === 0 || isInternalStructuredResponse) &&
     !hasCustomComponents &&
     !hasVisibleInterrupt
   ) {

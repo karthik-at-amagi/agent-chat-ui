@@ -60,6 +60,8 @@ import {
 import { useAuth } from "@/providers/Auth";
 import { useElicitation, type PromoSpine } from "@/providers/Stream";
 import { SpinePickerView } from "./spine-picker";
+import { ClipSelectionReviewView } from "./clip-selection-review";
+import { PromoEditReviewView } from "./promo-edit-review";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -581,6 +583,68 @@ export function Thread() {
                     )}
                     {pendingElicitation &&
                       (() => {
+                        if (pendingElicitation.kind === "edit_decisions_review") {
+                          try {
+                            const payload = JSON.parse(
+                              pendingElicitation.payload_json ?? "{}",
+                            );
+                            return (
+                              <div className="w-full max-w-3xl py-2 text-left">
+                                <div className="flex items-stretch gap-2">
+                                  <span className="relative flex w-3 shrink-0 justify-center overflow-visible">
+                                    <span className="bg-border absolute -top-3 -bottom-3 left-1/2 w-px -translate-x-1/2" />
+                                    <span className="bg-background relative z-10 flex h-6 items-center">
+                                      <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+                                    </span>
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <PromoEditReviewView
+                                      elicitationId={
+                                        pendingElicitation.elicitation_id
+                                      }
+                                      payload={payload}
+                                      onDone={clearElicitation}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          } catch {
+                            return null;
+                          }
+                        }
+
+                        if (pendingElicitation.kind === "clip_selection") {
+                          try {
+                            const payload = JSON.parse(
+                              pendingElicitation.payload_json ?? "{}",
+                            );
+                            return (
+                              <div className="w-full max-w-3xl py-2 text-left">
+                                <div className="flex items-stretch gap-2">
+                                  <span className="relative flex w-3 shrink-0 justify-center overflow-visible">
+                                    <span className="bg-border absolute -top-3 -bottom-3 left-1/2 w-px -translate-x-1/2" />
+                                    <span className="bg-background relative z-10 flex h-6 items-center">
+                                      <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+                                    </span>
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <ClipSelectionReviewView
+                                      elicitationId={
+                                        pendingElicitation.elicitation_id
+                                      }
+                                      payload={payload}
+                                      onDone={clearElicitation}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          } catch {
+                            return null;
+                          }
+                        }
+
                         let spines: PromoSpine[] = [];
                         try {
                           spines = JSON.parse(
@@ -590,12 +654,22 @@ export function Thread() {
                           /* empty */
                         }
                         return spines.length > 0 ? (
-                          <div className="mx-auto w-full max-w-3xl py-2">
-                            <SpinePickerView
-                              elicitationId={pendingElicitation.elicitation_id}
-                              spines={spines}
-                              onDone={clearElicitation}
-                            />
+                          <div className="w-full max-w-3xl py-2 text-left">
+                            <div className="flex items-stretch gap-2">
+                              <span className="relative flex w-3 shrink-0 justify-center overflow-visible">
+                                <span className="bg-border absolute -top-3 -bottom-3 left-1/2 w-px -translate-x-1/2" />
+                                <span className="bg-background relative z-10 flex h-6 items-center">
+                                  <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+                                </span>
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <SpinePickerView
+                                  elicitationId={pendingElicitation.elicitation_id}
+                                  spines={spines}
+                                  onDone={clearElicitation}
+                                />
+                              </div>
+                            </div>
                           </div>
                         ) : null;
                       })()}

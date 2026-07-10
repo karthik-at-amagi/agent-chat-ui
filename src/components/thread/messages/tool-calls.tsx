@@ -8,7 +8,7 @@ import {
   MoveHorizontal,
   X,
 } from "lucide-react";
-import { getRuntimeEnv } from "@/lib/utils";
+import { cn, getRuntimeEnv } from "@/lib/utils";
 import { useVideoEditor } from "@/providers/VideoEditor";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -270,12 +270,20 @@ export function ToolCalls({
   toolCalls: AIMessage["tool_calls"];
 }) {
   if (!toolCalls || toolCalls.length === 0) return null;
+  const visibleToolCalls = toolCalls.filter(
+    (tc) => !["decide_split_edits"].includes(tc.name || ""),
+  );
+  if (visibleToolCalls.length === 0) return null;
 
   return (
     <div className="grid w-full max-w-3xl grid-rows-[1fr_auto] gap-2 text-left">
-      {toolCalls.map((tc, idx) => {
+      {visibleToolCalls.map((tc, idx) => {
         const args = tc.args as Record<string, any>;
-        const hasArgs = Object.keys(args).length > 0;
+        const processUpdate: string | undefined = args?.process_update;
+        const displayArgs = Object.fromEntries(
+          Object.entries(args).filter(([k]) => k !== "process_update"),
+        );
+        const hasArgs = Object.keys(displayArgs).length > 0;
         return (
           <div
             key={idx}
@@ -290,11 +298,16 @@ export function ToolCalls({
                   </code>
                 )}
               </h3>
+              {processUpdate && (
+                <p className="text-muted-foreground mt-0.5 text-xs italic">
+                  {processUpdate}
+                </p>
+              )}
             </div>
             {hasArgs ? (
               <table className="divide-border min-w-full divide-y">
                 <tbody className="divide-border divide-y">
-                  {Object.entries(args).map(([key, value], argIdx) => (
+                  {Object.entries(displayArgs).map(([key, value], argIdx) => (
                     <tr key={argIdx}>
                       <td className="text-foreground px-4 py-2 text-sm font-medium whitespace-nowrap">
                         {key}
@@ -427,6 +440,320 @@ function formatTime(seconds: number): string {
     .padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+// ---- Split-edit (L-cut / J-cut) helpers --------------------------------
+
+type Range = [number, number];
+
+interface SplitEditInfo {
+  /** L-out on the LEFT clip: how many seconds its audio bleeds past its video end. 0 if none. */
+  lOut: number;
+  /** J-in on the RIGHT clip: how many seconds its audio starts before its video begins. 0 if none. */
+  jIn: number;
+}
+
+function rangeOrNull(v: any): Range | null {
+  if (Array.isArray(v) && v.length === 2 && v.every((n) => typeof n === "number")) {
+    return [v[0], v[1]];
+  }
+  return null;
+}
+
+function computeSplitEditInfo(
+  leftClip: any,
+  rightClip: any,
+  epsilon = 1e-3,
+): SplitEditInfo {
+  const lv = rangeOrNull(leftClip?.video_source_range_s);
+  const la = rangeOrNull(leftClip?.audio_source_range_s);
+  const rv = rangeOrNull(rightClip?.video_source_range_s);
+  const ra = rangeOrNull(rightClip?.audio_source_range_s);
+  const lOut = lv && la && la[1] > lv[1] + epsilon ? la[1] - lv[1] : 0;
+  const jIn = rv && ra && ra[0] < rv[0] - epsilon ? rv[0] - ra[0] : 0;
+  return { lOut, jIn };
+}
+
+function formatOverlap(s: number): string {
+  return `${s.toFixed(2)}s`;
+}
+
+/**
+ * Tiny V/A track diagram showing where audio bleeds relative to video across a
+ * boundary. The video cut is the center vertical line. The audio track can
+ * extend past it on either side.
+ */
+function findUiEventsDeep(value: any, depth = 0): any[] {
+  if (depth > 5 || value == null) return [];
+
+  if (typeof value === "string") {
+    try {
+      return findUiEventsDeep(JSON.parse(value), depth + 1);
+    } catch {
+      return [];
+    }
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findUiEventsDeep(item, depth + 1);
+      if (found.length > 0) return found;
+    }
+    return [];
+  }
+
+  if (typeof value === "object") {
+    const direct =
+      value?.ui?.events ||
+      value?.artifact?.ui?.events ||
+      value?.ui_events ||
+      value?.content?.ui?.events;
+    if (Array.isArray(direct)) return direct;
+
+    if (typeof value.text === "string") {
+      const found = findUiEventsDeep(value.text, depth + 1);
+      if (found.length > 0) return found;
+    }
+
+    if (value.content !== undefined) {
+      const found = findUiEventsDeep(value.content, depth + 1);
+      if (found.length > 0) return found;
+    }
+  }
+
+  return [];
+}
+
+function getUiEvents(resultData: any, parsedContent: any): any[] {
+  const seen = new Set<string>();
+  const merged = [...findUiEventsDeep(resultData), ...findUiEventsDeep(parsedContent)];
+  return merged.filter((event) => {
+    const key = JSON.stringify(event);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function SplitEditDiagram({
+  lOut,
+  jIn,
+  maxOverlap = 1.5,
+}: {
+  lOut: number;
+  jIn: number;
+  maxOverlap?: number;
+}) {
+  if (lOut <= 0 && jIn <= 0) return null;
+  // Normalize widths so 1.5s == half the diagram. Diagram is ~80px wide.
+  const total = 80;
+  const half = total / 2;
+  const lOutPx = Math.min(lOut / maxOverlap, 1) * half;
+  const jInPx = Math.min(jIn / maxOverlap, 1) * half;
+  return (
+    <svg
+      viewBox={`0 0 ${total} 22`}
+      width={total}
+      height={22}
+      className="mt-1"
+      aria-label="split edit timing"
+    >
+      {/* Video track row (top) - two blocks meeting at center */}
+      <rect x={0} y={2} width={half} height={8} fill="#6b7280" opacity={0.6} rx={1} />
+      <rect x={half} y={2} width={half} height={8} fill="#6b7280" opacity={0.6} rx={1} />
+      {/* Center video-cut line */}
+      <line x1={half} y1={0} x2={half} y2={22} stroke="#111827" strokeWidth={1.2} />
+      {/* Audio track row (bottom) - two blocks, each shifted for L / J overlap */}
+      <rect
+        x={0}
+        y={12}
+        width={half + lOutPx}
+        height={8}
+        fill="#2563eb"
+        opacity={0.8}
+        rx={1}
+      />
+      <rect
+        x={half - jInPx}
+        y={12}
+        width={half + jInPx}
+        height={8}
+        fill="#dc2626"
+        opacity={0.8}
+        rx={1}
+      />
+    </svg>
+  );
+}
+
+function UiEventCards({
+  events,
+  onClipPreview,
+}: {
+  events: any[];
+  onClipPreview?: (clip: any) => void;
+}) {
+  if (!events.length) return null;
+  return (
+    <div className="mb-4 flex flex-col gap-3">
+      {events.map((event, idx) => {
+        if (event.kind === "spine_selection") {
+          const payload = event.payload || {};
+          const options = payload.options || [];
+          const selected = Number(payload.selected_option || 0) - 1;
+          return (
+            <div key={idx} className="bg-background mb-2 rounded-lg p-1">
+              <div className="mb-2 px-1 text-sm font-semibold">Selected spine</div>
+              <div className="flex flex-col gap-1">
+                {options.map((spine: any, i: number) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "rounded-r-lg border-l-2 px-3 py-3 text-left transition-colors",
+                      i === selected
+                        ? "border-primary bg-primary/5"
+                        : "border-transparent bg-transparent",
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{spine.label}</span>
+                      <span className="text-muted-foreground bg-muted rounded-full px-2 py-0.5 text-xs">
+                        {spine.type}
+                      </span>
+                    </div>
+                    <p className="text-muted-foreground mt-1 text-sm">{spine.premise}</p>
+                    {Array.isArray(spine.trajectory) && spine.trajectory.length > 0 && (
+                      <p className="text-muted-foreground mt-1 text-xs">
+                        {spine.trajectory.join(" → ")}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        }
+
+        if (event.kind === "clip_selection_review") {
+          const payload = event.payload || {};
+          const clips = payload.clips || [];
+          return (
+            <div key={idx} className="bg-background mb-2 rounded-lg p-1">
+              <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                <div className="text-sm font-semibold">Clip selection review</div>
+                <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-xs">
+                  {event.status === "accepted" ? "Accepted" : "Needs revision"}
+                </span>
+              </div>
+              <p className="text-muted-foreground mb-3 px-1 text-sm">{payload.overall_reason}</p>
+              <div className="flex flex-col divide-y">
+                {clips.map((clip: any, i: number) => (
+                  <div key={i} className="py-3">
+                    <div className="flex items-start gap-3">
+                      {clip.thumbnail_url && (
+                        <button
+                          type="button"
+                          onClick={() => onClipPreview?.(clip)}
+                          className="shrink-0 overflow-hidden rounded"
+                        >
+                          <img
+                            src={clip.thumbnail_url}
+                            alt={clip.clip_title || "clip thumbnail"}
+                            className="h-16 w-28 object-cover transition-opacity hover:opacity-80"
+                          />
+                        </button>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-medium">
+                              {i + 1}. {clip.clip_title}
+                            </div>
+                            <div className="text-muted-foreground font-mono text-xs">
+                              {formatTime(clip.start_time)}–{formatTime(clip.end_time)}
+                            </div>
+                          </div>
+                          <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-xs">
+                            {clipFlavor(clip.reason || "")}
+                          </span>
+                        </div>
+                        <p className="text-muted-foreground mt-2 text-sm">
+                          {(clip.reason || "").replace(/^\s*\[[^\]]+\]\s*/, "")}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {payload.feedback && (
+                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+                  {payload.feedback}
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        if (event.kind === "editor_decisions") {
+          const payload = event.payload || {};
+          const clips = payload.clips || [];
+          const transitions = payload.transitions || [];
+          return (
+            <div key={idx} className="bg-background rounded-lg border p-3">
+              <div className="mb-3 text-sm font-semibold">Editor decisions</div>
+              <div className="flex flex-col gap-2">
+                {transitions.map((transition: any, i: number) => {
+                  const left = clips[i] || {};
+                  const right = clips[i + 1] || {};
+                  const splitInfo = computeSplitEditInfo(left, right);
+                  const hasSplitEdit = splitInfo.lOut > 0 || splitInfo.jIn > 0;
+                  return (
+                    <div key={i} className="rounded-lg border p-3 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium">Boundary {i + 1}</span>
+                        <span className="rounded-full border px-2 py-0.5 text-xs font-medium uppercase">
+                          {transition.kind ?? "cut"}
+                        </span>
+                        {transition.kind === "dissolve" && (
+                          <span className="text-muted-foreground font-mono text-xs">
+                            {transition.duration_s}s
+                          </span>
+                        )}
+                        {splitInfo.lOut > 0 ? (
+                          <span className="rounded border border-blue-500 bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                            L-cut +{formatOverlap(splitInfo.lOut)}
+                          </span>
+                        ) : splitInfo.jIn > 0 ? (
+                          <span className="rounded border border-red-500 bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950 dark:text-red-300">
+                            J-cut +{formatOverlap(splitInfo.jIn)}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/60 rounded border px-1.5 py-0.5 text-xs">
+                            butt cut
+                          </span>
+                        )}
+                      </div>
+                      {transition.reason && (
+                        <p className="text-muted-foreground mt-2 text-sm">{transition.reason}</p>
+                      )}
+                      {hasSplitEdit && <SplitEditDiagram lOut={splitInfo.lOut} jIn={splitInfo.jIn} />}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        }
+
+        return null;
+      })}
+    </div>
+  );
+}
+
+function clipFlavor(reason: string): string {
+  const match = reason.match(/^\s*\[([^\]]+)\]/);
+  return match?.[1] ?? "clip";
+}
+
 function ClipRangeVideo({
   url,
   start,
@@ -550,6 +877,10 @@ function toolArtifactMessage(message: ToolMessage): string {
   const { parsedContent } = parseToolContent(message);
   const resultData = message.artifact ?? parsedContent;
   const messageText =
+    resultData?.ui?.process_update ||
+    resultData?.artifact?.ui?.process_update ||
+    parsedContent?.artifact?.ui?.process_update ||
+    resultData?.process_update ||
     resultData?.message ||
     resultData?.artifact?.message ||
     parsedContent?.artifact?.message ||
@@ -558,13 +889,114 @@ function toolArtifactMessage(message: ToolMessage): string {
   return stringifyToolValue(messageText || message.name || "Tool completed");
 }
 
-export function CompactToolResult({ message }: { message: ToolMessage }) {
+function toolProcessUpdate(message: ToolMessage): string | undefined {
+  // Read process_update injected by the agent into the tool call args.
+  // LangGraph surfaces it on the ToolMessage as tool_input.
+  const input = (message as any).tool_input as Record<string, any> | undefined;
+  return input?.process_update ?? undefined;
+}
+
+function toolThumbnailRows(message: ToolMessage): any[] {
+  const { parsedContent } = parseToolContent(message);
+  const resultData = message.artifact ?? parsedContent;
   return (
-    <div className="w-full max-w-3xl py-1 text-left">
-      <div className="text-muted-foreground flex items-center justify-start gap-2 text-left text-sm">
-        <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
-        <span>{toolArtifactMessage(message)}</span>
+    resultData?.ui?.thumbnail_rows ||
+    resultData?.artifact?.ui?.thumbnail_rows ||
+    parsedContent?.artifact?.ui?.thumbnail_rows ||
+    []
+  );
+}
+
+function ThumbnailRows({
+  rows,
+  onThumbnailClick,
+}: {
+  rows: any[];
+  onThumbnailClick?: (thumb: any) => void;
+}) {
+  if (!rows?.length) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-1.5">
+      {rows.slice(0, 3).map((row, rowIdx) => (
+        <div key={rowIdx} className="flex items-center gap-2 overflow-hidden">
+          <span className="text-muted-foreground/70 min-w-20 truncate text-[10px]">
+            {row.label}
+          </span>
+          <div className="flex gap-1 overflow-hidden">
+            {(row.thumbnails || []).slice(0, 6).map((thumb: any, idx: number) => (
+              <button
+                key={`${thumb.url}-${idx}`}
+                type="button"
+                onClick={() => onThumbnailClick?.(thumb)}
+                className="shrink-0 overflow-hidden rounded border"
+              >
+                <img
+                  src={thumb.url}
+                  alt={thumb.title || "clip thumbnail"}
+                  title={thumb.title || thumb.clip_id}
+                  className="h-10 w-16 object-cover transition-opacity hover:opacity-80"
+                />
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function CompactToolResult({ message }: { message: ToolMessage }) {
+  const hidden = ["decide_split_edits"].includes(message.name || "");
+  const processUpdate = toolProcessUpdate(message);
+  const label = processUpdate || toolArtifactMessage(message);
+  const thumbnailRows = toolThumbnailRows(message);
+  const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
+  const cleanBackendUrl = backendUrl?.endsWith("/")
+    ? backendUrl.slice(0, -1)
+    : backendUrl;
+  const [expandedThumb, setExpandedThumb] = useState<any | null>(null);
+  if (hidden) return null;
+  return (
+    <div className="w-full max-w-3xl text-left">
+      <div className="text-muted-foreground flex items-stretch justify-start gap-2 text-left text-sm">
+        <span className="relative flex w-3 shrink-0 justify-center overflow-visible">
+          <span className="bg-border absolute -top-3 -bottom-3 left-1/2 w-px -translate-x-1/2" />
+          <span className="bg-background relative z-10 flex h-6 items-center">
+            <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+          </span>
+        </span>
+        <span className="py-1">
+          <span>{label}</span>
+          <ThumbnailRows rows={thumbnailRows} onThumbnailClick={setExpandedThumb} />
+        </span>
       </div>
+      {expandedThumb && cleanBackendUrl && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-background w-full max-w-2xl rounded-xl border shadow-xl">
+            <div className="border-border flex items-center justify-between border-b px-4 py-3">
+              <h4 className="text-sm font-semibold">Preview</h4>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setExpandedThumb(null)}
+                aria-label="Close preview"
+              >
+                <X className="size-4" />
+              </Button>
+            </div>
+            <div className="p-4">
+              <ClipRangeVideo
+                url={expandedThumb.video_url || `${cleanBackendUrl}/asset_files/${expandedThumb.asset_id}.mp4`}
+                start={Math.max(0, Number(expandedThumb.timestamp || 0))}
+                end={Math.max(0.1, Number(expandedThumb.timestamp || 0) + 8)}
+                controls
+                autoPlay
+                className="aspect-video w-full rounded-lg bg-black object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -604,6 +1036,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
         : contentLines.slice(0, MAX_LINES).join("\n") + "\n..."
       : contentStr;
 
+  const uiEvents = getUiEvents(resultData, parsedContent);
   const videoClips = findVideoClips(resultData);
   const finalPromoClips = getFinalPromoClips(resultData);
   const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
@@ -634,16 +1067,26 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     };
   });
 
-  const finalPromoClipKeys = new Set(
-    finalPromoClips.map(
-      (clip) => `${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`,
-    ),
-  );
-  const resolvedFinalPromoClips = resolvedVideoClips.filter((clip) =>
-    finalPromoClipKeys.has(
+  const finalPromoClipByKey = new Map(
+    finalPromoClips.map((clip) => [
       `${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`,
-    ),
+      clip,
+    ]),
   );
+  const resolvedFinalPromoClips = resolvedVideoClips
+    .filter((clip) =>
+      finalPromoClipByKey.has(
+        `${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`,
+      ),
+    )
+    .map((clip) => ({
+      // Spread artifact clip first so video_source_range_s / audio_source_range_s
+      // / outgoing_transition are present, then overlay resolved URL fields.
+      ...finalPromoClipByKey.get(
+        `${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`,
+      ),
+      ...clip,
+    }));
 
   const canShowClipFeedback = CLIP_FEEDBACK_WHITELISTED_TOOLS.includes(
     message.name || "",
@@ -656,10 +1099,17 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       .map((clip) => `${clip.asset_id}:${clip.clip_id}`);
   }, [canShowClipFeedback, videoClips]);
 
+  const hasProductUi =
+    uiEvents.length > 0 ||
+    resolvedFinalPromoClips.length > 0 ||
+    resolvedVideoClips.length > 0;
+
   const jsonItems = isJsonContent
     ? Array.isArray(parsedContent)
       ? parsedContent
-      : Object.entries(parsedContent)
+      : Object.entries(parsedContent).filter(
+          ([key]) => key !== "ui" && key !== "ui_events",
+        )
     : [];
 
   const getClipKey = (clip: any) => `${clip.asset_id}:${clip.clip_id}`;
@@ -870,86 +1320,174 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [expandedClipState]);
 
-  return (
-    <div className="grid w-full max-w-3xl grid-rows-[1fr_auto] gap-2 text-left">
-      <div className="border-border overflow-hidden rounded-lg border">
-        <div className="border-border bg-muted border-b px-4 py-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {message.name ? (
-              <h3 className="text-foreground font-medium">
-                Tool Result:{" "}
-                <code className="bg-muted rounded px-2 py-1">
-                  {message.name}
+  const resultBody = (
+    <div className="grid w-full grid-rows-[1fr_auto] gap-2 text-left">
+      <div
+        className={cn(
+          "overflow-hidden rounded-lg",
+          hasProductUi ? "" : "border-border border",
+        )}
+      >
+        {!hasProductUi && (
+          <div className="border-border bg-muted border-b px-4 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {message.name ? (
+                <h3 className="text-foreground font-medium">
+                  Tool Result:{" "}
+                  <code className="bg-muted rounded px-2 py-1">
+                    {message.name}
+                  </code>
+                </h3>
+              ) : (
+                <h3 className="text-foreground font-medium">Tool Result</h3>
+              )}
+              {message.tool_call_id && (
+                <code className="bg-muted ml-2 rounded px-2 py-1 text-sm">
+                  {message.tool_call_id}
                 </code>
-              </h3>
-            ) : (
-              <h3 className="text-foreground font-medium">Tool Result</h3>
-            )}
-            {message.tool_call_id && (
-              <code className="bg-muted ml-2 rounded px-2 py-1 text-sm">
-                {message.tool_call_id}
-              </code>
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        )}
         <motion.div
-          className="bg-muted/50 min-w-full"
+          className={cn("min-w-full", hasProductUi ? "" : "bg-muted/50")}
           initial={false}
           animate={{ height: "auto" }}
           transition={{ duration: 0.3 }}
         >
           <div className="p-3">
+            <UiEventCards
+              events={
+                resolvedFinalPromoClips.length > 0
+                  ? uiEvents.filter(
+                      (event) =>
+                        event.kind !== "editor_decisions" &&
+                        event.kind !== "clip_selection_review",
+                    )
+                  : uiEvents
+              }
+              onClipPreview={(clip) =>
+                setExpandedClipState({
+                  clip: {
+                    ...clip,
+                    fullAssetUrl: clip.video_url,
+                    displayUrl: clip.video_url,
+                    clip_start: clip.start_time,
+                    clip_end: clip.end_time,
+                  },
+                  start: clip.start_time,
+                  end: clip.end_time,
+                  maxEnd: null,
+                })
+              }
+            />
+
             {resolvedFinalPromoClips.length > 0 && (
-              <div className="bg-background mb-4 rounded-lg border p-3">
-                <div className="mb-3 text-sm font-semibold">
+              <div className="bg-background mb-4 rounded-lg p-1">
+                <div className="mb-3 px-1 text-sm font-semibold">
                   Promo simulation
                 </div>
-                <div className="flex gap-3 overflow-x-auto pb-1">
-                  {resolvedFinalPromoClips.map((clip, idx) => (
-                    <div
-                      key={`promo-sim-${idx}`}
-                      className="flex shrink-0 items-center gap-3"
-                    >
-                      <button
-                        type="button"
-                        className="group w-40 overflow-hidden rounded-lg border bg-black text-left"
-                        onClick={() => openExpandedClip(clip)}
-                      >
-                        {clip.thumbnailUrl ? (
-                          <img
-                            src={clip.thumbnailUrl}
-                            alt={clip.clip_title || clip.name || "Promo clip"}
-                            className="aspect-video w-full object-cover transition-opacity group-hover:opacity-80"
-                          />
-                        ) : (
-                          <div className="flex aspect-video w-full items-center justify-center text-xs text-white/70">
-                            Play clip
-                          </div>
-                        )}
-                        <div className="bg-background p-2 text-xs">
-                          <div className="truncate font-medium">
-                            {clip.clip_title || clip.name || `Clip ${idx + 1}`}
-                          </div>
-                          <div className="text-muted-foreground font-mono">
-                            {formatTime(clip.clip_start)}–
-                            {formatTime(clip.clip_end)}
-                          </div>
-                        </div>
-                      </button>
-                      {clip.outgoing_transition && (
-                        <div className="text-muted-foreground min-w-20 text-center text-xs">
-                          <div className="rounded-full border px-2 py-1 font-medium uppercase">
-                            {clip.outgoing_transition.kind}
-                          </div>
-                          {clip.outgoing_transition.kind === "dissolve" && (
-                            <div className="mt-1 font-mono">
-                              {clip.outgoing_transition.duration_s}s
+                <div className="flex flex-col divide-y">
+                  {resolvedFinalPromoClips.map((clip, idx) => {
+                    const nextClip = resolvedFinalPromoClips[idx + 1];
+                    const splitInfo = nextClip
+                      ? computeSplitEditInfo(clip, nextClip)
+                      : { lOut: 0, jIn: 0 };
+                    const hasSplitEdit =
+                      splitInfo.lOut > 0 || splitInfo.jIn > 0;
+                    const splitLabel = splitInfo.lOut > 0
+                      ? `L-cut +${formatOverlap(splitInfo.lOut)}`
+                      : splitInfo.jIn > 0
+                        ? `J-cut +${formatOverlap(splitInfo.jIn)}`
+                        : "butt cut";
+                    const splitReason =
+                      (splitInfo.jIn > 0
+                        ? nextClip?.split_edit_reason
+                        : clip.split_edit_reason) ||
+                      (splitInfo.lOut > 0
+                        ? "Outgoing audio carries into the next image."
+                        : splitInfo.jIn > 0
+                          ? "Incoming audio starts before its picture."
+                          : "Audio and video cut together at this boundary.");
+                    return (
+                      <div key={`promo-sim-${idx}`} className="py-3">
+                        <button
+                          type="button"
+                          className="group flex w-full items-start gap-3 text-left"
+                          onClick={() => openExpandedClip(clip)}
+                        >
+                          {clip.thumbnailUrl ? (
+                            <img
+                              src={clip.thumbnailUrl}
+                              alt={clip.clip_title || clip.name || "Promo clip"}
+                              className="h-20 w-36 shrink-0 rounded object-cover transition-opacity group-hover:opacity-80"
+                            />
+                          ) : (
+                            <div className="flex h-20 w-36 shrink-0 items-center justify-center rounded bg-black text-xs text-white/70">
+                              Play clip
                             </div>
                           )}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                          <div className="min-w-0 flex-1 pt-1">
+                            <div className="font-medium">
+                              {idx + 1}. {clip.clip_title || clip.name || `Clip ${idx + 1}`}
+                            </div>
+                            <div className="text-muted-foreground mt-0.5 font-mono text-xs">
+                              {formatTime(clip.clip_start)}–{formatTime(clip.clip_end)}
+                            </div>
+                            {clip.reason && (
+                              <p className="text-muted-foreground mt-1 line-clamp-2 text-sm">
+                                {String(clip.reason).replace(/^\s*\[[^\]]+\]\s*/, "")}
+                              </p>
+                            )}
+                          </div>
+                        </button>
+
+                        {nextClip && (
+                          <div className="ml-6 mt-3 border-l pl-6">
+                            <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
+                              <div className="flex flex-col items-start gap-1 text-xs">
+                                <div className="rounded-full border px-2 py-1 font-medium uppercase">
+                                  {clip.outgoing_transition?.kind ?? "cut"}
+                                  {clip.outgoing_transition?.kind === "dissolve" &&
+                                    ` ${clip.outgoing_transition.duration_s}s`}
+                                </div>
+                                <div
+                                  className={cn(
+                                    "rounded border px-1.5 py-0.5 font-medium",
+                                    splitInfo.lOut > 0
+                                      ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                                      : splitInfo.jIn > 0
+                                        ? "border-red-500 bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+                                        : "text-muted-foreground/60",
+                                  )}
+                                >
+                                  {splitLabel}
+                                </div>
+                                {hasSplitEdit && (
+                                  <SplitEditDiagram
+                                    lOut={splitInfo.lOut}
+                                    jIn={splitInfo.jIn}
+                                  />
+                                )}
+                              </div>
+                              <div className="space-y-2 text-sm">
+                                {clip.outgoing_transition?.reason && (
+                                  <p className="text-muted-foreground">
+                                    <span className="text-foreground font-medium">Transition: </span>
+                                    {clip.outgoing_transition.reason}
+                                  </p>
+                                )}
+                                <p className="text-muted-foreground">
+                                  <span className="text-foreground font-medium">Audio/video: </span>
+                                  {splitReason}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -965,7 +1503,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
               />
             )}
 
-            {resolvedVideoClips.length > 0 && (
+            {resolvedFinalPromoClips.length === 0 && resolvedVideoClips.length > 0 && (
               <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
                 {resolvedVideoClips.map((clip, idx) => (
                   <div
@@ -1059,18 +1597,19 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                 ))}
               </div>
             )}
-            <AnimatePresence
-              mode="wait"
-              initial={false}
-            >
-              <motion.div
-                key={isExpanded ? "expanded" : "collapsed"}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -20 }}
-                transition={{ duration: 0.2 }}
+            {!hasProductUi && (
+              <AnimatePresence
+                mode="wait"
+                initial={false}
               >
-                {isJsonContent ? (
+                <motion.div
+                  key={isExpanded ? "expanded" : "collapsed"}
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {isJsonContent ? (
                   <table className="divide-border min-w-full divide-y">
                     <tbody className="divide-border divide-y">
                       {(isExpanded
@@ -1102,10 +1641,12 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                 ) : (
                   <code className="block text-sm">{displayedContent}</code>
                 )}
-              </motion.div>
-            </AnimatePresence>
+                </motion.div>
+              </AnimatePresence>
+            )}
           </div>
-          {((shouldTruncate && !isJsonContent) ||
+          {!hasProductUi &&
+            ((shouldTruncate && !isJsonContent) ||
             (isJsonContent && jsonItems.length > MAX_JSON_ITEMS)) && (
             <motion.button
               onClick={() => setIsExpanded(!isExpanded)}
@@ -1145,89 +1686,109 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                   className="aspect-video w-full rounded-lg bg-black object-contain"
                 />
               )}
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="bg-muted/40 space-y-2 rounded-lg border p-3">
-                  <div className="text-sm font-medium">Start</div>
-                  <div className="text-muted-foreground font-mono text-xs">
-                    {formatTime(expandedClipState.start)} (
-                    {expandedClipState.start.toFixed(1)}s)
+              {resolvedFinalPromoClips.length === 0 && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="bg-muted/40 space-y-2 rounded-lg border p-3">
+                      <div className="text-sm font-medium">Start</div>
+                      <div className="text-muted-foreground font-mono text-xs">
+                        {formatTime(expandedClipState.start)} (
+                        {expandedClipState.start.toFixed(1)}s)
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => adjustExpandedStart(-10)}
+                        >
+                          -10s
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => adjustExpandedStart(10)}
+                        >
+                          +10s
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="bg-muted/40 space-y-2 rounded-lg border p-3">
+                      <div className="text-sm font-medium">End</div>
+                      <div className="text-muted-foreground font-mono text-xs">
+                        {formatTime(expandedClipState.end)} (
+                        {expandedClipState.end.toFixed(1)}s)
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => adjustExpandedEnd(-10)}
+                        >
+                          -10s
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => adjustExpandedEnd(10)}
+                        >
+                          +10s
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex w-full gap-2">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="flex-1"
-                      onClick={() => adjustExpandedStart(-10)}
+                      className="flex-1 items-center gap-2"
+                      onClick={() => {
+                        addToMediaPool({
+                          assetId: expandedClipState.clip.asset_id,
+                          fullAssetUrl: expandedClipState.clip.fullAssetUrl,
+                          name:
+                            expandedClipState.clip.name ||
+                            message.name ||
+                            "Video Clip",
+                          type: "video",
+                          start: expandedClipState.start,
+                          end: expandedClipState.end,
+                          duration:
+                            expandedClipState.clip.duration ||
+                            expandedClipState.end,
+                        });
+                        toast.success("Expanded clip added to Media Pool");
+                      }}
                     >
-                      -10s
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => adjustExpandedStart(10)}
-                    >
-                      +10s
-                    </Button>
-                  </div>
-                </div>
-                <div className="bg-muted/40 space-y-2 rounded-lg border p-3">
-                  <div className="text-sm font-medium">End</div>
-                  <div className="text-muted-foreground font-mono text-xs">
-                    {formatTime(expandedClipState.end)} (
-                    {expandedClipState.end.toFixed(1)}s)
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => adjustExpandedEnd(-10)}
-                    >
-                      -10s
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => adjustExpandedEnd(10)}
-                    >
-                      +10s
+                      <PlusCircle className="size-3" />
+                      Send to pool
                     </Button>
                   </div>
-                </div>
-              </div>
-              <div className="flex w-full gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="flex-1 items-center gap-2"
-                  onClick={() => {
-                    addToMediaPool({
-                      assetId: expandedClipState.clip.asset_id,
-                      fullAssetUrl: expandedClipState.clip.fullAssetUrl,
-                      name:
-                        expandedClipState.clip.name ||
-                        message.name ||
-                        "Video Clip",
-                      type: "video",
-                      start: expandedClipState.start,
-                      end: expandedClipState.end,
-                      duration:
-                        expandedClipState.clip.duration ||
-                        expandedClipState.end,
-                    });
-                    toast.success("Expanded clip added to Media Pool");
-                  }}
-                >
-                  <PlusCircle className="size-3" />
-                  Send to pool
-                </Button>
-              </div>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+
+  if (!hasProductUi) return resultBody;
+
+  return (
+    <div className="w-full max-w-3xl text-left">
+      <div className="flex items-stretch gap-2">
+        <span className="relative flex w-3 shrink-0 justify-center overflow-visible">
+          <span className="bg-border absolute -top-3 -bottom-3 left-1/2 w-px -translate-x-1/2" />
+          <span className="bg-background relative z-10 flex h-6 items-center">
+            <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+          </span>
+        </span>
+        <div className="min-w-0 flex-1">{resultBody}</div>
+      </div>
     </div>
   );
 }
