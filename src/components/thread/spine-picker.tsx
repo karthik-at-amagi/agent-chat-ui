@@ -74,6 +74,7 @@ export function SpinePickerView({
 
       if (!res.ok) throw new Error(await res.text());
       setSubmitted("accept");
+      onDone();
     } catch (err: any) {
       toast.error("Failed to submit spine", {
         description: err?.message,
@@ -110,6 +111,7 @@ export function SpinePickerView({
       });
       if (!res.ok) throw new Error(await res.text());
       setSubmitted("revise");
+      onDone();
     } catch (err: any) {
       toast.error("Failed to submit spine feedback", {
         description: err?.message,
