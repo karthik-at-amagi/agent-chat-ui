@@ -62,6 +62,7 @@ import { useElicitation, type PromoSpine } from "@/providers/Stream";
 import { SpinePickerView } from "./spine-picker";
 import { ClipSelectionReviewView } from "./clip-selection-review";
 import { PromoEditReviewView } from "./promo-edit-review";
+import { QuestionnaireReviewView } from "./questionnaire-review";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -647,6 +648,38 @@ export function Thread() {
                           }
                         }
 
+                        if (pendingElicitation.kind === "questionnaire") {
+                          try {
+                            const payload = JSON.parse(
+                              pendingElicitation.payload_json ?? "{}",
+                            );
+                            return (
+                              <div className="w-full max-w-3xl py-2 text-left">
+                                <div className="flex items-stretch gap-2">
+                                  <span className="relative flex w-3 shrink-0 justify-center overflow-visible">
+                                    <span className="bg-border absolute -top-3 -bottom-3 left-1/2 w-px -translate-x-1/2" />
+                                    <span className="bg-background relative z-10 flex h-6 items-center">
+                                      <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+                                    </span>
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <QuestionnaireReviewView
+                                      key={pendingElicitation.elicitation_id}
+                                      elicitationId={
+                                        pendingElicitation.elicitation_id
+                                      }
+                                      payload={payload}
+                                      onDone={clearElicitation}
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          } catch {
+                            return null;
+                          }
+                        }
+
                         let spines: PromoSpine[] = [];
                         try {
                           spines = JSON.parse(
@@ -780,7 +813,7 @@ export function Thread() {
                             <Button
                               key="stop"
                               onClick={() => stream.stop()}
-                              className="ml-auto"
+                              className="ml-auto rounded-md"
                             >
                               <LoaderCircle className="h-4 w-4 animate-spin" />
                               Cancel
@@ -788,7 +821,7 @@ export function Thread() {
                           ) : (
                             <Button
                               type="submit"
-                              className="ml-auto shadow-md transition-all"
+                              className="ml-auto rounded-md shadow-md transition-all"
                               disabled={
                                 isLoading ||
                                 isThreadBusy ||

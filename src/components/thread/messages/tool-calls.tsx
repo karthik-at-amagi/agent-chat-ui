@@ -271,7 +271,7 @@ export function ToolCalls({
 }) {
   if (!toolCalls || toolCalls.length === 0) return null;
   const visibleToolCalls = toolCalls.filter(
-    (tc) => !["decide_split_edits"].includes(tc.name || ""),
+    (tc) => !["decide_split_edits", "ask_user"].includes(tc.name || ""),
   );
   if (visibleToolCalls.length === 0) return null;
 
@@ -412,7 +412,8 @@ const MAX_CHAR_LENGTH = 800;
 const MAX_LINES = 12;
 const MAX_JSON_ITEMS = 4;
 const CLIP_FEEDBACK_WHITELISTED_TOOLS = ["show_clips"];
-const GENERIC_CLIP_GRID_TOOLS = ["show_clips", "search", "neighboring_clips"]; 
+const GENERIC_CLIP_GRID_TOOLS = ["show_clips", "search", "neighboring_clips"];
+const OTHER_OPTION_ID = "__other__";
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -635,7 +636,7 @@ function UiEventCards({
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium">{spine.label}</span>
-                      <span className="text-muted-foreground bg-muted rounded-full px-2 py-0.5 text-xs">
+                      <span className="border-border text-muted-foreground border bg-background px-2 py-0.5 text-xs">
                         {spine.type}
                       </span>
                     </div>
@@ -672,7 +673,7 @@ function UiEventCards({
                         <button
                           type="button"
                           onClick={() => onClipPreview?.(clip)}
-                          className="shrink-0 overflow-hidden rounded"
+                          className="shrink-0 overflow-hidden rounded-none"
                         >
                           <img
                             src={clip.thumbnail_url}
@@ -712,6 +713,80 @@ function UiEventCards({
           );
         }
 
+        if (event.kind === "questionnaire_answers") {
+          const payload = event.payload || {};
+          const questions: any[] = payload.questions || [];
+          const answers: any[] = payload.answers || [];
+          const answersByQid = new Map<string, any>(
+            answers.map((a) => [a.question_id, a]),
+          );
+          const isSkipped =
+            payload.status === "skipped" || payload.status === "timeout";
+          return (
+            <div key={idx} className="bg-background mb-2 p-1">
+              <div className="mb-2 px-1 text-sm font-semibold">
+                Clarifying answers
+              </div>
+              {isSkipped ? (
+                <div className="text-muted-foreground px-1 text-sm">
+                  (clarification skipped)
+                </div>
+              ) : (
+                <div className="flex flex-col divide-y divide-border">
+                  {questions.map((q: any, qi: number) => {
+                    const answer = answersByQid.get(q.id) || {};
+                    // Dedupe options by id; __other__ is never rendered as a tag.
+                    const opts: any[] = (q.options || []).filter(
+                      (o: any, i: number,
+                       arr: any[]) =>
+                        o.id !== OTHER_OPTION_ID &&
+                        arr.findIndex((x: any) => x.id === o.id) === i,
+                    );
+                    const optLabelById = new Map<string, string>(
+                      opts.map((o) => [o.id, o.label]),
+                    );
+                    const freeText = answer.free_text;
+                    const rawSelectedIds: string[] =
+                      answer.selected_option_ids || [];
+                    const selectedIds = rawSelectedIds.filter(
+                      (id: string) => id !== OTHER_OPTION_ID,
+                    );
+                    const hasFreeText =
+                      freeText && String(freeText).trim().length > 0;
+                    const hasAnswer =
+                      hasFreeText || selectedIds.length > 0;
+                    return (
+                      <div key={qi} className="py-2">
+                        <div className="text-sm font-semibold">{q.prompt}</div>
+                        {!hasAnswer ? (
+                          <div className="text-muted-foreground mt-1 text-sm">
+                            — skipped —
+                          </div>
+                        ) : hasFreeText ? (
+                          <div className="text-muted-foreground mt-1 text-sm italic">
+                            → {freeText}
+                          </div>
+                        ) : (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {selectedIds.map((optId: string, oi: number) => (
+                              <span
+                                key={oi}
+                                className="border-border text-muted-foreground border bg-background px-2 py-0.5 text-xs"
+                              >
+                                {optLabelById.get(optId) || optId}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        }
+
         if (event.kind === "editor_decisions") {
           const payload = event.payload || {};
           const clips = payload.clips || [];
@@ -726,10 +801,10 @@ function UiEventCards({
                   const splitInfo = computeSplitEditInfo(left, right);
                   const hasSplitEdit = splitInfo.lOut > 0 || splitInfo.jIn > 0;
                   return (
-                    <div key={i} className="rounded-lg border p-3 text-sm">
+                    <div key={i} className="rounded-none border p-3 text-sm">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">Boundary {i + 1}</span>
-                        <span className="rounded-full border px-2 py-0.5 text-xs font-medium uppercase">
+                        <span className="rounded-none border px-2 py-0.5 text-xs font-medium uppercase">
                           {transition.kind ?? "cut"}
                         </span>
                         {transition.kind === "dissolve" && (
@@ -738,16 +813,16 @@ function UiEventCards({
                           </span>
                         )}
                         {splitInfo.lOut > 0 ? (
-                          <span className="rounded border border-blue-500 bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                          <span className="rounded-none border border-blue-500 bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-300">
                             L-cut +{formatOverlap(splitInfo.lOut)}
                           </span>
                         ) : splitInfo.jIn > 0 ? (
-                          <span className="rounded border border-red-500 bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950 dark:text-red-300">
+                          <span className="rounded-none border border-red-500 bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-950 dark:text-red-300">
                             J-cut +{formatOverlap(splitInfo.jIn)}
                           </span>
                         ) : (
-                          <span className="text-muted-foreground/60 rounded border px-1.5 py-0.5 text-xs">
-                            butt cut
+                          <span className="text-muted-foreground/60 rounded-none border px-1.5 py-0.5 text-xs">
+                            straight cut
                           </span>
                         )}
                       </div>
@@ -948,7 +1023,7 @@ function ThumbnailRows({
                 key={`${thumb.url}-${idx}`}
                 type="button"
                 onClick={() => onThumbnailClick?.(thumb)}
-                className="shrink-0 overflow-hidden rounded border"
+                className="shrink-0 overflow-hidden rounded-none border"
               >
                 <img
                   src={thumb.url}
@@ -966,7 +1041,7 @@ function ThumbnailRows({
 }
 
 export function CompactToolResult({ message }: { message: ToolMessage }) {
-  const hidden = ["decide_split_edits"].includes(message.name || "");
+  const hidden = ["decide_split_edits", "ask_user"].includes(message.name || "");
   const processUpdate = toolProcessUpdate(message);
   const label = processUpdate || toolArtifactMessage(message);
   const thumbnailRows = toolThumbnailRows(message);
@@ -1460,7 +1535,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                       ? `L-cut +${formatOverlap(splitInfo.lOut)}`
                       : splitInfo.jIn > 0
                         ? `J-cut +${formatOverlap(splitInfo.jIn)}`
-                        : "butt cut";
+                        : "straight cut";
                     const splitReason =
                       (splitInfo.jIn > 0
                         ? nextClip?.split_edit_reason
@@ -1481,10 +1556,10 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                             <img
                               src={clip.thumbnailUrl}
                               alt={clip.clip_title || clip.name || "Promo clip"}
-                              className="h-20 w-36 shrink-0 rounded object-cover transition-opacity group-hover:opacity-80"
+                              className="h-20 w-36 shrink-0 rounded-none object-cover transition-opacity group-hover:opacity-80"
                             />
                           ) : (
-                            <div className="flex h-20 w-36 shrink-0 items-center justify-center rounded bg-black text-xs text-white/70">
+                            <div className="flex h-20 w-36 shrink-0 items-center justify-center rounded-none bg-black text-xs text-white/70">
                               Play clip
                             </div>
                           )}
@@ -1507,14 +1582,14 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                           <div className="ml-6 mt-3 border-l pl-6">
                             <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
                               <div className="flex flex-col items-start gap-1 text-xs">
-                                <div className="rounded-full border px-2 py-1 font-medium uppercase">
+                                <div className="rounded-none border px-2 py-1 font-medium uppercase">
                                   {clip.outgoing_transition?.kind ?? "cut"}
                                   {clip.outgoing_transition?.kind === "dissolve" &&
                                     ` ${clip.outgoing_transition.duration_s}s`}
                                 </div>
                                 <div
                                   className={cn(
-                                    "rounded border px-1.5 py-0.5 font-medium",
+                                    "rounded-none border px-1.5 py-0.5 font-medium",
                                     splitInfo.lOut > 0
                                       ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
                                       : splitInfo.jIn > 0
@@ -1574,7 +1649,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                     {clip.displayUrl && (
                       <button
                         type="button"
-                        className="overflow-hidden rounded-lg border bg-black"
+                        className="overflow-hidden rounded-none border bg-black"
                         onClick={() => openExpandedClip(clip)}
                       >
                         {clip.thumbnailUrl ? (
