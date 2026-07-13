@@ -44,6 +44,7 @@ function clipFlavor(reason: string): string {
 export function ClipSelectionReviewView({
   elicitationId,
   payload,
+  onDone,
 }: ClipSelectionReviewProps) {
   const [feedback, setFeedback] = useState("");
   const [loading, setLoading] = useState<"accept" | "revise" | null>(null);
@@ -77,6 +78,7 @@ export function ClipSelectionReviewView({
       });
       if (!res.ok) throw new Error(await res.text());
       setSubmitted(accepted ? "accept" : "revise");
+      onDone();
     } catch (err: any) {
       toast.error("Failed to submit clip review", {
         description: err?.message,
