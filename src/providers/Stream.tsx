@@ -46,6 +46,7 @@ export interface PromoSpine {
 export interface MCPElicitationEvent {
   type: "mcp_elicitation_request";
   elicitation_id: string;
+  thread_id?: string | null;
   server_name: string;
   tool_name: string;
   text: string;
@@ -185,6 +186,46 @@ const StreamSession = ({
     },
   };
   const streamValue = useTypedStream(streamOptions);
+
+  useEffect(() => {
+    if (!threadId || !apiUrl) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const base = apiUrl.endsWith("/") ? apiUrl.slice(0, -1) : apiUrl;
+        const res = await fetch(
+          `${base}/elicitations?thread_id=${encodeURIComponent(threadId)}`,
+          {
+            headers: {
+              ...(apiKey ? { "X-Api-Key": apiKey } : {}),
+              ...(apiId ? { "x-login-id": apiId } : {}),
+              ...(accountId ? { "x-account-id": accountId } : {}),
+            },
+          },
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const request = data?.pending?.[0]?.request as
+          | MCPElicitationEvent
+          | undefined;
+        if (!cancelled && request?.type === "mcp_elicitation_request") {
+          setPendingElicitation((current) =>
+            current?.elicitation_id === request.elicitation_id
+              ? current
+              : request,
+          );
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    void poll();
+    const interval = window.setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [accountId, apiId, apiKey, apiUrl, threadId]);
 
   useEffect(() => {
     checkGraphStatus(apiUrl, apiKey, apiId).then((ok) => {

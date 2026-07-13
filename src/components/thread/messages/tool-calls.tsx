@@ -412,6 +412,7 @@ const MAX_CHAR_LENGTH = 800;
 const MAX_LINES = 12;
 const MAX_JSON_ITEMS = 4;
 const CLIP_FEEDBACK_WHITELISTED_TOOLS = ["show_clips"];
+const GENERIC_CLIP_GRID_TOOLS = ["show_clips", "search", "neighboring_clips"]; 
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
@@ -587,6 +588,9 @@ function SplitEditDiagram({
 function productVisibleUiEvents(events: any[], hasFinalPromo = false): any[] {
   return events.filter((event) => {
     if (event.kind === "clip_selection_review" && event.status === "needs_revision") {
+      return false;
+    }
+    if (event.kind === "spine_selection" && event.status === "needs_revision") {
       return false;
     }
     if (
@@ -1053,14 +1057,26 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       : contentStr;
 
   const uiEvents = getUiEvents(resultData, parsedContent);
-  const videoClips = findVideoClips(resultData);
+  const isInternalClipSelectionRevision =
+    message.name === "review_clip_selection" &&
+    (resultData?.status === "needs_revision" || parsedContent?.status === "needs_revision");
+  const isInternalSpineRevision =
+    message.name === "spine" &&
+    uiEvents.some(
+      (event) => event.kind === "spine_selection" && event.status === "needs_revision",
+    );
+  const canRenderGenericClipGrid = GENERIC_CLIP_GRID_TOOLS.includes(
+    message.name || "",
+  );
+  const allVideoClips = isInternalClipSelectionRevision ? [] : findVideoClips(resultData);
+  const genericVideoClips = canRenderGenericClipGrid ? allVideoClips : [];
   const finalPromoClips = getFinalPromoClips(resultData);
   const backendUrl = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL");
   const cleanBackendUrl = backendUrl?.endsWith("/")
     ? backendUrl.slice(0, -1)
     : backendUrl;
 
-  const resolvedVideoClips = videoClips.map((clip) => {
+  const resolveClipForDisplay = (clip: any) => {
     let fullAssetUrl = clip.video_url;
     if (fullAssetUrl && !fullAssetUrl.startsWith("http") && cleanBackendUrl) {
       // rewrite /assets/<id> → /asset_files/<id>
@@ -1081,7 +1097,10 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       fullAssetUrl,
       thumbnailUrl: clip.thumbnail_url,
     };
-  });
+  };
+
+  const resolvedAllVideoClips = allVideoClips.map(resolveClipForDisplay);
+  const resolvedGenericVideoClips = genericVideoClips.map(resolveClipForDisplay);
 
   const finalPromoClipByKey = new Map(
     finalPromoClips.map((clip) => [
@@ -1089,7 +1108,7 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       clip,
     ]),
   );
-  const resolvedFinalPromoClips = resolvedVideoClips
+  const resolvedFinalPromoClips = resolvedAllVideoClips
     .filter((clip) =>
       finalPromoClipByKey.has(
         `${clip.asset_id}:${clip.clip_start}:${clip.clip_end}`,
@@ -1110,19 +1129,42 @@ export function ToolResult({ message }: { message: ToolMessage }) {
 
   const feedbackClipKeys = useMemo(() => {
     if (!canShowClipFeedback) return [];
-    return videoClips
+    return genericVideoClips
       .filter((clip) => clip.asset_id && clip.clip_id)
       .map((clip) => `${clip.asset_id}:${clip.clip_id}`);
-  }, [canShowClipFeedback, videoClips]);
+  }, [canShowClipFeedback, genericVideoClips]);
 
   const visibleUiEvents = productVisibleUiEvents(
     uiEvents,
     resolvedFinalPromoClips.length > 0,
   );
+  const internalRevisionMessages = isInternalSpineRevision
+    ? [
+        "Refining spine options with your feedback.",
+        "Reworking the promo direction before searching clips.",
+        "Drafting a better set of spine choices.",
+      ]
+    : [
+        "Refining clip selection for a cleaner dialogue/visual rhythm.",
+        "Checking visual bridges for quiet ranges before showing the selection.",
+        "Replacing dialogue-heavy visual bridges with cleaner picture moments.",
+        "Tightening the selection so dialogue can bleed over true visual clips.",
+      ];
+  const internalRevisionMessage = internalRevisionMessages[
+    Math.abs(String(message.id || message.tool_call_id || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0)) %
+      internalRevisionMessages.length
+  ];
+  const isInternalRevisionOnly =
+    (isInternalClipSelectionRevision || isInternalSpineRevision) &&
+    visibleUiEvents.length === 0 &&
+    resolvedFinalPromoClips.length === 0 &&
+    resolvedGenericVideoClips.length === 0;
   const hasProductUi =
+    isInternalClipSelectionRevision ||
+    isInternalSpineRevision ||
     visibleUiEvents.length > 0 ||
     resolvedFinalPromoClips.length > 0 ||
-    resolvedVideoClips.length > 0;
+    resolvedGenericVideoClips.length > 0;
 
   const jsonItems = isJsonContent
     ? Array.isArray(parsedContent)
@@ -1376,6 +1418,13 @@ export function ToolResult({ message }: { message: ToolMessage }) {
           transition={{ duration: 0.3 }}
         >
           <div className="p-3">
+            {!isInternalRevisionOnly &&
+              (isInternalClipSelectionRevision || isInternalSpineRevision) && (
+              <div className="text-muted-foreground py-1 text-sm">
+                {internalRevisionMessage}
+              </div>
+            )}
+
             <UiEventCards
               events={visibleUiEvents}
               onClipPreview={(clip) =>
@@ -1515,9 +1564,9 @@ export function ToolResult({ message }: { message: ToolMessage }) {
               />
             )}
 
-            {resolvedFinalPromoClips.length === 0 && resolvedVideoClips.length > 0 && (
+            {resolvedFinalPromoClips.length === 0 && resolvedGenericVideoClips.length > 0 && (
               <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-2">
-                {resolvedVideoClips.map((clip, idx) => (
+                {resolvedGenericVideoClips.map((clip, idx) => (
                   <div
                     key={`clip-${idx}`}
                     className="flex flex-col gap-2"
@@ -1787,6 +1836,22 @@ export function ToolResult({ message }: { message: ToolMessage }) {
       )}
     </div>
   );
+
+  if (isInternalRevisionOnly) {
+    return (
+      <div className="w-full max-w-3xl text-left">
+        <div className="text-muted-foreground flex items-stretch justify-start gap-2 text-left text-sm">
+          <span className="relative flex w-3 shrink-0 justify-center overflow-visible">
+            <span className="bg-border absolute -top-3 -bottom-3 left-1/2 w-px -translate-x-1/2" />
+            <span className="bg-background relative z-10 flex h-6 items-center">
+              <span className="bg-muted-foreground/60 size-1.5 rounded-full" />
+            </span>
+          </span>
+          <span className="py-1">{internalRevisionMessage}</span>
+        </div>
+      </div>
+    );
+  }
 
   if (!hasProductUi) return resultBody;
 

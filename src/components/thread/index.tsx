@@ -599,6 +599,7 @@ export function Thread() {
                                   </span>
                                   <div className="min-w-0 flex-1">
                                     <PromoEditReviewView
+                                      key={pendingElicitation.elicitation_id}
                                       elicitationId={
                                         pendingElicitation.elicitation_id
                                       }
@@ -630,6 +631,7 @@ export function Thread() {
                                   </span>
                                   <div className="min-w-0 flex-1">
                                     <ClipSelectionReviewView
+                                      key={pendingElicitation.elicitation_id}
                                       elicitationId={
                                         pendingElicitation.elicitation_id
                                       }
@@ -664,6 +666,7 @@ export function Thread() {
                               </span>
                               <div className="min-w-0 flex-1">
                                 <SpinePickerView
+                                  key={pendingElicitation.elicitation_id}
                                   elicitationId={pendingElicitation.elicitation_id}
                                   spines={spines}
                                   onDone={clearElicitation}
