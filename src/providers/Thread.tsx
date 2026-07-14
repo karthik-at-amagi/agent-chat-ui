@@ -70,6 +70,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const envAssistantId: string | undefined = getRuntimeEnv(
     "NEXT_PUBLIC_ASSISTANT_ID",
   );
+  const envApiUrl: string | undefined = getRuntimeEnv("NEXT_PUBLIC_API_URL");
   const envVideoBackendUrl: string | undefined = getRuntimeEnv(
     "NEXT_PUBLIC_VIDEO_BACKEND_URL",
   );
@@ -80,10 +81,10 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [apiUrl] = useQueryState("apiUrl");
   const [assistantId] = useQueryState("assistantId");
 
-  const finalApiUrl =
-    apiUrl || (envDemo === "true" ? envVideoBackendUrl : undefined);
-  const finalAssistantId =
-    assistantId || (envDemo === "true" ? envAssistantId : undefined);
+  // In DEMO mode env vars are authoritative; finalApiUrl is the LangGraph
+  // runtime URL (NEXT_PUBLIC_API_URL), NOT the video backend.
+  const finalApiUrl = envDemo === "true" ? envApiUrl : apiUrl;
+  const finalAssistantId = envDemo === "true" ? envAssistantId : assistantId;
 
   const cleanBackendUrl = envVideoBackendUrl?.endsWith("/")
     ? envVideoBackendUrl.slice(0, -1)

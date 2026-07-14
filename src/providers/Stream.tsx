@@ -284,10 +284,12 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
 
   useEffect(() => {
     if (envDemo === "true") {
-      if (!apiUrl && envVideoBackendUrl) {
-        void setApiUrl(envVideoBackendUrl);
+      // Force the URL query params to match the env-derived values so a stale
+      // ?apiUrl / ?assistantId from an earlier session can't override them.
+      if (apiUrl !== envApiUrl && envApiUrl) {
+        void setApiUrl(envApiUrl);
       }
-      if (!assistantId && envAssistantId) {
+      if (assistantId !== envAssistantId && envAssistantId) {
         void setAssistantId(envAssistantId);
       }
     }
@@ -295,7 +297,7 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     envDemo,
     apiUrl,
     assistantId,
-    envVideoBackendUrl,
+    envApiUrl,
     envAssistantId,
     setApiUrl,
     setAssistantId,
@@ -312,11 +314,12 @@ export const StreamProvider: React.FC<{ children: ReactNode }> = ({
     _setApiKey(key);
   };
 
-  // Determine final values to use, prioritizing URL params then env vars if DEMO is true
-  const finalApiUrl =
-    apiUrl || (envDemo === "true" ? envVideoBackendUrl : undefined);
-  const finalAssistantId =
-    assistantId || (envDemo === "true" ? envAssistantId : undefined);
+  // Determine final values to use.
+  // In DEMO mode the env vars are authoritative (ignore any stale ?apiUrl /
+  // ?assistantId query params). finalApiUrl is the LangGraph runtime URL
+  // (NEXT_PUBLIC_API_URL), NOT the video backend.
+  const finalApiUrl = envDemo === "true" ? envApiUrl : apiUrl;
+  const finalAssistantId = envDemo === "true" ? envAssistantId : assistantId;
 
   // Show the form if we: don't have an API URL, or don't have an assistant ID
   if (!finalApiUrl || !finalAssistantId) {
