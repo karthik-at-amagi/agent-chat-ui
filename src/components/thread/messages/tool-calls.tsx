@@ -45,15 +45,27 @@ function HlsPlayer({ hlsUrl }: { hlsUrl: string }) {
 
     const attach = async () => {
       const Hls = (await import("hls.js")).default;
-      console.log("[HlsPlayer] hlsUrl:", hlsUrl, "isSupported:", Hls.isSupported());
       if (Hls.isSupported()) {
-        hls = new Hls({ lowLatencyMode: false });
+        hls = new Hls({
+          maxBufferLength: 8,
+          maxMaxBufferLength: 16,
+          startFragPrefetch: true,
+          lowLatencyMode: false,
+          autoStartLoad: true,
+        });
         hls.loadSource(hlsUrl);
         hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => { console.log("[HlsPlayer] manifest parsed"); });
-        hls.on(Hls.Events.ERROR, (_: any, data: any) => console.error("[HlsPlayer] hls error:", data.type, data.details, data.fatal));
+        let fragsLoaded = 0;
+        hls.on(Hls.Events.FRAG_LOADED, () => {
+          fragsLoaded++;
+          if (fragsLoaded === 3) {
+            video.play().catch(() => {});
+          }
+        });
+        hls.on(Hls.Events.ERROR, (_: any, data: any) => {
+          if (data.fatal) console.error("[HlsPlayer] fatal hls error:", data.type, data.details);
+        });
       } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        // Safari native HLS
         video.src = hlsUrl;
       }
     };
@@ -66,8 +78,6 @@ function HlsPlayer({ hlsUrl }: { hlsUrl: string }) {
     <video
       ref={videoRef}
       controls
-      autoPlay
-      muted
       className="w-full rounded bg-black"
     />
   );
@@ -85,13 +95,31 @@ function PromoRenderPlayer({
   cacheKey: string | null;
 }) {
   const [status, setStatus] = useState<RenderStatus>("idle");
-  const [progress, setProgress] = useState(0);
+  const [animPct, setAnimPct] = useState(0);
   const [hlsUrl, setHlsUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const backendUrlRaw = getRuntimeEnv("NEXT_PUBLIC_VIDEO_BACKEND_URL") ?? "";
   const cleanBackendUrl = backendUrlRaw.endsWith("/") ? backendUrlRaw.slice(0, -1) : backendUrlRaw;
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hlsUrlRef = useRef<string | null>(null);
 
-  // Trigger render when component mounts (once)
+  // Animate progress bar toward 90% over ~8s using rAF; snaps to 100 on done
+  useEffect(() => {
+    if (status !== "rendering") return;
+    const start = performance.now();
+    const totalMs = 8000;
+    let raf: number;
+    const tick = () => {
+      const elapsed = performance.now() - start;
+      const pct = Math.min(90, 90 * (1 - Math.exp((-3 * elapsed) / totalMs)));
+      setAnimPct(Math.round(pct));
+      if (elapsed < totalMs * 2) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [status]);
+
+  // Trigger render on mount (once)
   useEffect(() => {
     if (status !== "idle") return;
     if (clips.length === 0) return;
@@ -125,18 +153,15 @@ function PromoRenderPlayer({
       body: JSON.stringify(body),
     })
       .then((r) => r.json())
-      .then(({ job_id, hls_url }: { job_id: string; hls_url: string }) => {
-        // Show player immediately with the playlist URL (segments stream in as ffmpeg encodes)
-        if (hls_url) setHlsUrl(`${backendUrl}${hls_url}`);
-
+      .then(({ job_id }: { job_id: string }) => {
         let consecutiveFailures = 0;
         const maxRetries = 5;
-        const poll = setInterval(async () => {
+        pollRef.current = setInterval(async () => {
           const res = await fetch(`${backendUrl}/render/status/${job_id}`);
           if (!res.ok) {
             consecutiveFailures++;
             if (consecutiveFailures >= maxRetries) {
-              clearInterval(poll);
+              clearInterval(pollRef.current!);
               setStatus("error");
               setError("Render job not found");
             }
@@ -144,34 +169,36 @@ function PromoRenderPlayer({
           }
           consecutiveFailures = 0;
           const job = await res.json();
-          setProgress(job.progress);
-          if (job.hls_url && !hlsUrl) setHlsUrl(`${backendUrl}${job.hls_url}`);
+          if (job.hls_url && !hlsUrlRef.current) {
+            const url = `${backendUrl}${job.hls_url}`;
+            hlsUrlRef.current = url;
+            setHlsUrl(url);
+          }
           if (job.status === "done") {
-            clearInterval(poll);
+            clearInterval(pollRef.current!);
+            setAnimPct(100);
             setStatus("done");
             onRenderDone(job.hls_url ?? "");
           } else if (job.status === "failed") {
-            clearInterval(poll);
+            clearInterval(pollRef.current!);
             setStatus("error");
             setError(job.error ?? "Render failed");
           }
-        }, 2000);
-        return () => clearInterval(poll);
+        }, 1000);
       });
-  }, [clips.length, apiId, onRenderDone, cleanBackendUrl]);
 
-  // Idle: nothing
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clips.length, apiId, cleanBackendUrl]);
+
   if (status === "idle") return null;
 
-  // Error state
   if (status === "error") {
     return (
       <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3">
         <div className="mb-2 text-sm font-semibold text-red-700">Promo render failed</div>
         {error && (
-          <div className="mb-2 rounded bg-white/50 p-2 text-xs text-red-600">
-            {error}
-          </div>
+          <div className="mb-2 rounded bg-white/50 p-2 text-xs text-red-600">{error}</div>
         )}
         <button
           className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
@@ -183,81 +210,23 @@ function PromoRenderPlayer({
     );
   }
 
-  // Once we have an HLS URL, show the player (works during encoding and after)
   if (hlsUrl) {
     return (
       <div className="mb-4 rounded-lg border p-3">
-        <div className="mb-2 flex items-center justify-between text-sm font-semibold">
-          <span>{status === "done" ? "Promo playback" : `Rendering… ${progress}%`}</span>
-        </div>
-        {status === "rendering" && (
-          <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
-            <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
-          </div>
-        )}
+        <div className="mb-2 text-sm font-semibold">Promo playback</div>
         <HlsPlayer hlsUrl={hlsUrl} />
       </div>
     );
   }
 
-  // Rendering state: animated storyboard + progress bar (no HLS URL yet)
   return (
     <div className="mb-4 rounded-lg border p-3">
-      <div className="mb-2 text-sm font-semibold">
-        Rendering promo — {clips.length} clips with transitions
-      </div>
-
-      {/* Animated clip strip */}
-      <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-        {clips.map((clip, idx) => (
-          <div
-            key={`promo-render-${idx}`}
-            className="relative flex shrink-0 flex-col items-center gap-1"
-          >
-            <div
-              className={`
-                aspect-video w-28 overflow-hidden rounded border
-                ${status === "rendering"
-                  ? "animate-pulse border-blue-400"
-                  : "border-gray-300"}
-              `}
-            >
-              {clip.thumbnailUrl ? (
-                <img
-                  src={clip.thumbnailUrl}
-                  alt={`Clip ${idx + 1}`}
-                  className="aspect-video w-full object-cover"
-                />
-              ) : (
-                <div className="flex aspect-video w-full items-center justify-center bg-gray-200 text-xs text-gray-500">
-                  Clip {idx + 1}
-                </div>
-              )}
-            </div>
-            <div className="text-center text-xs text-gray-600">
-              <div className="font-medium">Clip {idx + 1}</div>
-              <div className="font-mono">
-                {formatTime(clip.clip_start)}–{formatTime(clip.clip_end)}
-              </div>
-              {clip.outgoing_transition && (
-                <div className="text-[10px] capitalize text-gray-400">
-                  {clip.outgoing_transition.kind}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Progress bar */}
-      <div className="mb-1 h-2 w-full overflow-hidden rounded bg-gray-200">
+      <div className="mb-2 text-sm font-semibold">Rendering promo…</div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
         <div
-          className="h-full rounded bg-blue-500 transition-all duration-300"
-          style={{ width: `${progress}%` }}
+          className="h-full rounded-full bg-blue-500"
+          style={{ width: `${animPct}%`, transition: "width 0.4s ease-out" }}
         />
-      </div>
-      <div className="text-xs text-gray-500">
-        {progress < 100 ? `${progress}% complete` : "Render complete"}
       </div>
     </div>
   );
@@ -738,7 +707,7 @@ function UiEventCards({
                     // Dedupe options by id; __other__ is never rendered as a tag.
                     const opts: any[] = (q.options || []).filter(
                       (o: any, i: number,
-                       arr: any[]) =>
+                        arr: any[]) =>
                         o.id !== OTHER_OPTION_ID &&
                         arr.findIndex((x: any) => x.id === o.id) === i,
                     );
@@ -1215,19 +1184,19 @@ export function ToolResult({ message }: { message: ToolMessage }) {
   );
   const internalRevisionMessages = isInternalSpineRevision
     ? [
-        "Refining spine options with your feedback.",
-        "Reworking the promo direction before searching clips.",
-        "Drafting a better set of spine choices.",
-      ]
+      "Refining spine options with your feedback.",
+      "Reworking the promo direction before searching clips.",
+      "Drafting a better set of spine choices.",
+    ]
     : [
-        "Refining clip selection for a cleaner dialogue/visual rhythm.",
-        "Checking visual bridges for quiet ranges before showing the selection.",
-        "Replacing dialogue-heavy visual bridges with cleaner picture moments.",
-        "Tightening the selection so dialogue can bleed over true visual clips.",
-      ];
+      "Refining clip selection for a cleaner dialogue/visual rhythm.",
+      "Checking visual bridges for quiet ranges before showing the selection.",
+      "Replacing dialogue-heavy visual bridges with cleaner picture moments.",
+      "Tightening the selection so dialogue can bleed over true visual clips.",
+    ];
   const internalRevisionMessage = internalRevisionMessages[
     Math.abs(String(message.id || message.tool_call_id || "").split("").reduce((sum, char) => sum + char.charCodeAt(0), 0)) %
-      internalRevisionMessages.length
+    internalRevisionMessages.length
   ];
   const isInternalRevisionOnly =
     (isInternalClipSelectionRevision || isInternalSpineRevision) &&
@@ -1245,8 +1214,8 @@ export function ToolResult({ message }: { message: ToolMessage }) {
     ? Array.isArray(parsedContent)
       ? parsedContent
       : Object.entries(parsedContent).filter(
-          ([key]) => key !== "ui" && key !== "ui_events",
-        )
+        ([key]) => key !== "ui" && key !== "ui_events",
+      )
     : [];
 
   const getClipKey = (clip: any) => `${clip.asset_id}:${clip.clip_id}`;
@@ -1495,10 +1464,10 @@ export function ToolResult({ message }: { message: ToolMessage }) {
           <div className="p-3">
             {!isInternalRevisionOnly &&
               (isInternalClipSelectionRevision || isInternalSpineRevision) && (
-              <div className="text-muted-foreground py-1 text-sm">
-                {internalRevisionMessage}
-              </div>
-            )}
+                <div className="text-muted-foreground py-1 text-sm">
+                  {internalRevisionMessage}
+                </div>
+              )}
 
             <UiEventCards
               events={visibleUiEvents}
@@ -1746,54 +1715,54 @@ export function ToolResult({ message }: { message: ToolMessage }) {
                   transition={{ duration: 0.2 }}
                 >
                   {isJsonContent ? (
-                  <table className="divide-border min-w-full divide-y">
-                    <tbody className="divide-border divide-y">
-                      {(isExpanded
-                        ? jsonItems
-                        : jsonItems.slice(0, MAX_JSON_ITEMS)
-                      ).map((item, argIdx) => {
-                        const [key, value] = Array.isArray(parsedContent)
-                          ? [argIdx, item]
-                          : [item[0], item[1]];
-                        return (
-                          <tr key={argIdx}>
-                            <td className="text-foreground px-4 py-2 text-sm font-medium whitespace-nowrap">
-                              {key}
-                            </td>
-                            <td className="text-muted-foreground px-4 py-2 text-sm">
-                              {isComplexValue(value) ? (
-                                <code className="bg-muted rounded px-2 py-1 font-mono text-sm break-all">
-                                  {JSON.stringify(value, null, 2)}
-                                </code>
-                              ) : (
-                                String(value)
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                ) : (
-                  <code className="block text-sm">{displayedContent}</code>
-                )}
+                    <table className="divide-border min-w-full divide-y">
+                      <tbody className="divide-border divide-y">
+                        {(isExpanded
+                          ? jsonItems
+                          : jsonItems.slice(0, MAX_JSON_ITEMS)
+                        ).map((item, argIdx) => {
+                          const [key, value] = Array.isArray(parsedContent)
+                            ? [argIdx, item]
+                            : [item[0], item[1]];
+                          return (
+                            <tr key={argIdx}>
+                              <td className="text-foreground px-4 py-2 text-sm font-medium whitespace-nowrap">
+                                {key}
+                              </td>
+                              <td className="text-muted-foreground px-4 py-2 text-sm">
+                                {isComplexValue(value) ? (
+                                  <code className="bg-muted rounded px-2 py-1 font-mono text-sm break-all">
+                                    {JSON.stringify(value, null, 2)}
+                                  </code>
+                                ) : (
+                                  String(value)
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <code className="block text-sm">{displayedContent}</code>
+                  )}
                 </motion.div>
               </AnimatePresence>
             )}
           </div>
           {!hasProductUi &&
             ((shouldTruncate && !isJsonContent) ||
-            (isJsonContent && jsonItems.length > MAX_JSON_ITEMS)) && (
-            <motion.button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="border-border text-muted-foreground hover:bg-muted hover:text-foreground flex w-full cursor-pointer items-center justify-center border-t-[1px] py-2 transition-all duration-200 ease-in-out"
-              initial={{ scale: 1 }}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-            >
-              {isExpanded ? <ChevronUp /> : <ChevronDown />}
-            </motion.button>
-          )}
+              (isJsonContent && jsonItems.length > MAX_JSON_ITEMS)) && (
+              <motion.button
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="border-border text-muted-foreground hover:bg-muted hover:text-foreground flex w-full cursor-pointer items-center justify-center border-t-[1px] py-2 transition-all duration-200 ease-in-out"
+                initial={{ scale: 1 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                {isExpanded ? <ChevronUp /> : <ChevronDown />}
+              </motion.button>
+            )}
         </motion.div>
       </div>
       {expandedClipState && (
