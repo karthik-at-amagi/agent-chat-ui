@@ -170,6 +170,7 @@ export function AssistantMessage({
     "finalize_promo",
     "review_clip_selection",
     "submit_final_promo",
+    "ask_user",
   ];
   const isRichToolResult =
     message?.type === "tool" &&

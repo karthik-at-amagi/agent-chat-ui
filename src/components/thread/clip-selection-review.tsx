@@ -97,7 +97,7 @@ export function ClipSelectionReviewView({
   );
 
   return (
-    <div className="bg-background flex w-full flex-col items-start gap-4 rounded-lg p-1">
+    <div className="bg-background flex w-full flex-col items-start gap-4 rounded-none p-1">
       <div className="px-1">
         <h3 className="text-sm font-semibold">Review clip selection</h3>
         <p className="text-muted-foreground mt-0.5 text-xs">
@@ -110,7 +110,7 @@ export function ClipSelectionReviewView({
       </div>
 
       <div className="flex w-full flex-col gap-3 px-1">
-        <div className="bg-muted/30 rounded-lg p-3">
+        <div className="border-border border p-3">
           <p className="text-foreground text-sm font-medium">
             Spine: {payload.selected_spine?.label}
           </p>
@@ -150,7 +150,7 @@ export function ClipSelectionReviewView({
                     <button
                       type="button"
                       onClick={() => setPreviewClip(clip)}
-                      className="shrink-0 overflow-hidden rounded"
+                      className="shrink-0 overflow-hidden rounded-none"
                     >
                       <img
                         src={clip.thumbnail_url}
@@ -169,7 +169,7 @@ export function ClipSelectionReviewView({
                           {formatTime(clip.start_time)}–{formatTime(clip.end_time)} · {duration.toFixed(1)}s
                         </p>
                       </div>
-                      <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-xs">
+                      <span className="border-border text-muted-foreground border bg-background px-2 py-0.5 text-xs">
                         {clipFlavor(clip.reason)}
                       </span>
                     </div>
@@ -221,7 +221,7 @@ export function ClipSelectionReviewView({
       </div>
       {previewClip?.video_url && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-background w-full max-w-2xl rounded-xl border shadow-xl">
+          <div className="bg-background w-full max-w-2xl rounded-none border shadow-none">
             <div className="border-border flex items-center justify-between border-b px-4 py-3">
               <h4 className="text-sm font-semibold">Preview</h4>
               <Button variant="ghost" size="icon" onClick={() => setPreviewClip(null)}>
@@ -233,7 +233,7 @@ export function ClipSelectionReviewView({
                 src={`${previewClip.video_url}#t=${Math.max(0, previewClip.start_time)},${previewClip.end_time}`}
                 controls
                 autoPlay
-                className="aspect-video w-full rounded-lg bg-black object-contain"
+                className="aspect-video w-full rounded-none bg-black object-contain"
               />
             </div>
           </div>

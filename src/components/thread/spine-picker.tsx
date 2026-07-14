@@ -125,7 +125,7 @@ export function SpinePickerView({
   };
 
   return (
-    <div className="bg-background flex w-full flex-col items-start gap-3 rounded-lg p-1">
+    <div className="bg-background flex w-full flex-col items-start gap-3 rounded-none p-1">
       <div className="px-1 text-sm font-semibold">Choose a promo spine</div>
 
       <div className="flex w-full flex-col gap-1">
@@ -134,7 +134,7 @@ export function SpinePickerView({
             return (
               <div
                 key={i}
-                className="border-primary flex w-full flex-col gap-2 rounded-lg border p-4"
+                className="border-primary flex w-full flex-col gap-2 border p-4"
               >
                 <Input
                   placeholder="Label"
@@ -195,7 +195,7 @@ export function SpinePickerView({
                 }
               }}
               className={cn(
-                "group flex w-full cursor-pointer flex-col items-start gap-1 rounded-r-lg border-l-2 px-3 py-3 text-left transition-colors",
+                "group flex w-full cursor-pointer flex-col items-start gap-1 border-l-2 px-3 py-3 text-left transition-colors",
                 selected === i
                   ? "border-primary bg-primary/5"
                   : "border-transparent bg-transparent hover:bg-muted/50",
@@ -206,7 +206,7 @@ export function SpinePickerView({
                   {spine.label}
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground bg-muted rounded-full px-2 py-0.5 text-xs">
+                  <span className="border-border text-muted-foreground border bg-background px-2 py-0.5 text-xs">
                     {spine.type}
                   </span>
                   <Button

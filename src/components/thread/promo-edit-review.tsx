@@ -113,7 +113,7 @@ export function PromoEditReviewView({ elicitationId, payload, onDone }: Props) {
   };
 
   return (
-    <div className="bg-background flex w-full flex-col gap-4 rounded-lg p-1">
+    <div className="bg-background flex w-full flex-col gap-4 rounded-none p-1">
       <div className="px-1">
         <h3 className="text-sm font-semibold">Review promo edit</h3>
         <p className="text-muted-foreground mt-0.5 text-xs">
@@ -122,7 +122,7 @@ export function PromoEditReviewView({ elicitationId, payload, onDone }: Props) {
       </div>
 
       <div className="px-1">
-        <div className="bg-background rounded-lg p-1">
+        <div className="bg-background p-1">
           <div className="mb-3 text-sm font-semibold">Promo simulation</div>
           <div className="flex gap-3 overflow-x-auto pb-1">
             {payload.clips.map((clip, idx) => {
@@ -130,7 +130,7 @@ export function PromoEditReviewView({ elicitationId, payload, onDone }: Props) {
               const nextClip = payload.clips[idx + 1];
               return (
                 <div key={idx} className="flex shrink-0 items-center gap-3">
-                  <div className="w-40 overflow-hidden rounded-lg border bg-black text-left">
+                  <div className="w-40 overflow-hidden rounded-none border bg-black text-left">
                     {clip.thumbnail_url ? (
                       <button type="button" onClick={() => setPreviewClip(clip)} className="block w-full">
                         <img
@@ -156,7 +156,7 @@ export function PromoEditReviewView({ elicitationId, payload, onDone }: Props) {
                   {nextClip && transition && (
                     <div className="text-muted-foreground min-w-32 text-center text-xs">
                       <select
-                        className="bg-background border-border w-full rounded-full border px-2 py-1 text-center text-xs font-medium uppercase"
+                        className="bg-background border-border w-full border px-2 py-1 text-center text-xs font-medium uppercase"
                         value={valueFor(transition)}
                         onChange={(e) => setTransition(idx, e.target.value)}
                       >
@@ -187,7 +187,7 @@ export function PromoEditReviewView({ elicitationId, payload, onDone }: Props) {
       </div>
       {previewClip?.video_url && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-background w-full max-w-2xl rounded-xl border shadow-xl">
+          <div className="bg-background w-full max-w-2xl rounded-none border shadow-none">
             <div className="border-border flex items-center justify-between border-b px-4 py-3">
               <h4 className="text-sm font-semibold">Preview</h4>
               <Button variant="ghost" size="icon" onClick={() => setPreviewClip(null)}>
@@ -199,7 +199,7 @@ export function PromoEditReviewView({ elicitationId, payload, onDone }: Props) {
                 src={`${previewClip.video_url}#t=${Math.max(0, previewClip.start_time)},${previewClip.end_time}`}
                 controls
                 autoPlay
-                className="aspect-video w-full rounded-lg bg-black object-contain"
+                className="aspect-video w-full rounded-none bg-black object-contain"
               />
             </div>
           </div>
