@@ -70,6 +70,7 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const envAssistantId: string | undefined = getRuntimeEnv(
     "NEXT_PUBLIC_ASSISTANT_ID",
   );
+  const envApiUrl: string | undefined = getRuntimeEnv("NEXT_PUBLIC_API_URL");
   const envVideoBackendUrl: string | undefined = getRuntimeEnv(
     "NEXT_PUBLIC_VIDEO_BACKEND_URL",
   );
@@ -81,9 +82,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [assistantId] = useQueryState("assistantId");
 
   const finalApiUrl =
-    apiUrl || (envDemo === "true" ? envVideoBackendUrl : undefined);
+    envDemo === "true" ? envApiUrl : apiUrl;
   const finalAssistantId =
-    assistantId || (envDemo === "true" ? envAssistantId : undefined);
+    envDemo === "true" ? envAssistantId : assistantId;
 
   const cleanBackendUrl = envVideoBackendUrl?.endsWith("/")
     ? envVideoBackendUrl.slice(0, -1)
