@@ -153,7 +153,22 @@ function PromoRenderPlayer({
       body: JSON.stringify(body),
     })
       .then((r) => r.json())
-      .then(({ job_id }: { job_id: string }) => {
+      .then((initial: { job_id: string; status?: string; hls_url?: string; progress?: number }) => {
+        const { job_id } = initial;
+
+        // Cache hit: backend already returned status=done + hls_url in the POST.
+        // Skip polling entirely — otherwise we bang on /render/status/{job_id}
+        // for a job the backend never wrote to Redis.
+        if (initial.status === "done" && initial.hls_url) {
+          const url = `${backendUrl}${initial.hls_url}`;
+          hlsUrlRef.current = url;
+          setHlsUrl(url);
+          setAnimPct(100);
+          setStatus("done");
+          onRenderDone(initial.hls_url);
+          return;
+        }
+
         let consecutiveFailures = 0;
         const maxRetries = 5;
         pollRef.current = setInterval(async () => {
