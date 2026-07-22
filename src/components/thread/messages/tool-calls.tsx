@@ -236,10 +236,22 @@ function PromoRenderPlayer({
 
   return (
     <div className="mb-4 rounded-lg border p-3">
-      <div className="mb-2 text-sm font-semibold">Rendering promo…</div>
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className="text-sm font-semibold">
+          {phase === "downloading"
+            ? "Downloading source video…"
+            : phase === "rendering"
+              ? "Rendering promo…"
+              : "Preparing render…"}
+          {phaseDetail && (
+            <span className="ml-2 text-xs font-normal text-gray-500">{phaseDetail}</span>
+          )}
+        </div>
+        <div className="text-xs tabular-nums text-gray-500">{animPct}%</div>
+      </div>
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
         <div
-          className="h-full rounded-full bg-blue-500"
+          className={`h-full rounded-full ${phase === "downloading" ? "bg-amber-500" : "bg-blue-500"}`}
           style={{ width: `${animPct}%`, transition: "width 0.4s ease-out" }}
         />
       </div>
